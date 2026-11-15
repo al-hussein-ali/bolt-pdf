@@ -1,0 +1,29 @@
+[package]
+name = "pdf_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+name = "pdf_core"
+
+[dependencies]
+uniffi = { version = "0.28", features = ["cli"] }
+pdfium-render = { version = "0.8", features = ["thread_safe", "pdfium_latest", "image_025"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+lru = "0.12"
+thiserror = "1.0"
+parking_lot = "0.12"
+memmap2 = "0.9"
+sha2 = "0.10"
+hex = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-sys = "0.5"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+

@@ -1,0 +1,16 @@
+.tools/
+target/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+*.so
+!android/app/src/main/jniLibs/arm64-v8a/libpdfium.so
+.DS_Store
+Thumbs.db
+

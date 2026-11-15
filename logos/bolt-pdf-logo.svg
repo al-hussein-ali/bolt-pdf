@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Bolt PDF logo</title>
+  <desc id="desc">A crimson document with a folded corner and a geometrically centered lightning bolt cut out in transparent negative space.</desc>
+  <path fill="#D9232E" fill-rule="evenodd" d="
+    M142 58
+    H322
+    L406 142
+    V374
+    C406 418 382 442 338 442
+    H142
+    C98 442 74 418 74 374
+    V126
+    C74 82 98 58 142 58
+    Z
+    M258 124
+    L162 261
+    H240
+    L182 376
+    L320 211
+    H238
+    Z
+  "/>
+  <path d="M322 58 V118 C322 131 333 142 346 142 H406" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+</svg>

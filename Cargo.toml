@@ -1,0 +1,11 @@
+[workspace]
+members = ["pdf_core"]
+resolver = "2"
+
+[profile.release]
+opt-level = "z"          # Optimize aggressively for binary size
+lto = "fat"              # Full cross-crate Link-Time Optimization
+codegen-units = 1        # Maximize dead-code elimination
+panic = "abort"          # Strip stack unwinding tables (~30% smaller binary)
+strip = "symbols"        # Strip all debug and symbol tables from .so output
+
