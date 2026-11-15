@@ -24,7 +24,7 @@
 - **Smart Text Selection (LTR, RTL & Mixed BiDi)** — Accurate character/word selection with BiDi support, Arabic diacritic ordering, and duplicate-glyph cleanup.
 - **Full-Text Search & Reading State** — Fast in-document search, bookmarks/favorites, and automatic reading progress persistence backed by bundled SQLite (`rusqlite`).
 - **On-Device PDF Tools** — Built-in PDF tools (`tools.rs`) directly inside the app with zero third-party server uploads.
-- **Built-in Markdown Reader** — Clean native Markdown viewer alongside your PDF library.
+- **Built-in Markdown Reader** — Native Markdown viewer with GFM tables, callouts, task lists, clickable links, and automatic RTL/LTR direction support.
 - **Private Google Drive Cloud Sync** — Optional sync using Google Drive's isolated `appDataFolder` (`drive.appdata` scope) for Recent & On-Device PDFs, reading progress, and favorites — featuring SHA-256 deduplication, quota checks, and conflict resolution.
 - **Bilingual Interface** — Complete **English** and **Arabic (العربية)** UI support.
 
@@ -53,12 +53,22 @@
 │       ├── GoogleDriveSyncManager.kt # Google Sign-In & Drive appDataFolder REST client
 │       ├── NativeZeroCopy.kt       # Direct JNI bitmap rendering bridge
 │       └── ui/
-│           ├── HomeScreen.kt       # Recent, On Device & Favorites library UI
+│           ├── HomeScreen.kt       # Recent, On Device & Favorites library screen
+│           ├── home/               # Modular Home top bars, tabs, cards, dialogs & filters
+│           │   ├── HomeTopBars.kt
+│           │   ├── HomeTabContent.kt
+│           │   ├── HomeCards.kt
+│           │   ├── HomeDialogs.kt
+│           │   └── HomeFilterSort.kt
 │           ├── ReaderScreen.kt     # PDF viewer, zoom, search & BiDi text selection
 │           ├── PdfToolsScreens.kt  # On-device PDF toolkit UI
-│           ├── MarkdownReaderScreen.kt # Built-in Markdown reader
+│           ├── MarkdownReaderScreen.kt # Built-in Markdown reader screen
+│           ├── markdown/           # Markdown parser, RTL/LTR detector & block views
+│           │   ├── MarkdownParser.kt
+│           │   └── MarkdownBlockViews.kt
 │           ├── SettingsScreen.kt   # Theme, language & Cloud Sync settings
 │           ├── AppStrings.kt       # English & Arabic localization
+│           ├── DismissibleSnackbarHost.kt # Swipe-to-dismiss snackbar host
 │           └── Theme.kt            # Material 3 theming
 ├── pdf_core/                       # Rust native PDF engine (cdylib + staticlib + rlib)
 │   └── src/
