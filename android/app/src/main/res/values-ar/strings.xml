@@ -273,6 +273,16 @@
     <string name="drive_delete_failed">فشل حذف الملف: %1$s</string>
     <string name="drive_delete_confirm_title">حذف من Google Drive؟</string>
     <string name="drive_delete_confirm_message">إزالة \"%1$s\" من التخزين السحابي في Google Drive؟ لن تتأثر نسختك المحلية.</string>
+    <string name="auto_upload_title">رفع تلقائي للملفات الأخيرة</string>
+    <string name="auto_upload_subtitle">نسخ احتياطي تلقائي لملفات PDF الأخيرة إلى Google Drive يومياً</string>
+    <string name="auto_upload_time">وقت الرفع</string>
+    <string name="auto_upload_wifi_only">عبر Wi-Fi فقط</string>
+    <string name="auto_upload_wifi_only_subtitle">الرفع والمزامنة فقط عند الاتصال بشبكة Wi-Fi</string>
+    <string name="auto_upload_keep_old">الاحتفاظ بالإصدارات القديمة على Drive</string>
+    <string name="auto_upload_keep_old_subtitle">إبقاء النسخ السابقة عند رفع ملف PDF معدّل</string>
+    <string name="auto_sync_title">مزامنة تلقائية من Drive</string>
+    <string name="auto_sync_subtitle">جلب الملفات الجديدة وتقدّم القراءة الأحدث بعد الرفع</string>
+    <string name="select_upload_time">اختر وقت الرفع</string>
     <string name="type_text_hint">اكتب النص…</string>
     <string name="save_pdf_dialog_title">حفظ ملف PDF</string>
     <string name="save_as_new_file">حفظ كملف جديد</string>

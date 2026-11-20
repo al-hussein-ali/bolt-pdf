@@ -25,13 +25,18 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MergeType
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,8 +52,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +68,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bolt.pdf.DriveAutoSyncSettings
 import com.bolt.pdf.DriveStoredFile
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +79,7 @@ fun SettingsScreen(
     driveAccountEmail: String?,
     driveStoredFiles: List<DriveStoredFile>,
     isLoadingDriveFiles: Boolean,
+    driveAutoSyncSettings: DriveAutoSyncSettings,
     onBack: () -> Unit,
     onToggleDarkMode: (Boolean) -> Unit,
     onSelectLanguage: (String) -> Unit,
@@ -78,12 +87,14 @@ fun SettingsScreen(
     onDisconnectGoogleAccount: () -> Unit,
     onLoadDriveStoredFiles: () -> Unit,
     onDeleteDriveStoredFile: (DriveStoredFile) -> Unit,
+    onUpdateAutoSyncSettings: ((DriveAutoSyncSettings) -> DriveAutoSyncSettings) -> Unit,
     onOpenMergePdfs: () -> Unit,
     onOpenImagesToPdf: () -> Unit,
     onPickMarkdown: () -> Unit,
 ) {
     val strings = LocalAppStrings.current
     var showDriveStorageDialog by remember { mutableStateOf(false) }
+    var showTimePickerDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -258,6 +269,75 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.outlineVariant,
                         modifier = Modifier.padding(horizontal = 16.dp)
                     )
+                    SwitchSettingRow(
+                        icon = Icons.Default.CloudUpload,
+                        title = strings.autoUploadTitle,
+                        subtitle = strings.autoUploadSubtitle,
+                        checked = driveAutoSyncSettings.autoUploadEnabled,
+                        onCheckedChange = { enabled ->
+                            onUpdateAutoSyncSettings { it.copy(autoUploadEnabled = enabled) }
+                        }
+                    )
+                    if (driveAutoSyncSettings.autoUploadEnabled) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        ToolRow(
+                            icon = Icons.Default.Schedule,
+                            title = strings.autoUploadTime,
+                            subtitle = formatTime24Or12(
+                                driveAutoSyncSettings.uploadHour,
+                                driveAutoSyncSettings.uploadMinute
+                            ),
+                            onClick = { showTimePickerDialog = true }
+                        )
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        SwitchSettingRow(
+                            icon = Icons.Default.History,
+                            title = strings.autoUploadKeepOld,
+                            subtitle = strings.autoUploadKeepOldSubtitle,
+                            checked = driveAutoSyncSettings.keepOldVersions,
+                            onCheckedChange = { keepOld ->
+                                onUpdateAutoSyncSettings { it.copy(keepOldVersions = keepOld) }
+                            }
+                        )
+                    }
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    SwitchSettingRow(
+                        icon = Icons.Default.CloudSync,
+                        title = strings.autoSyncTitle,
+                        subtitle = strings.autoSyncSubtitle,
+                        checked = driveAutoSyncSettings.autoSyncEnabled,
+                        onCheckedChange = { enabled ->
+                            onUpdateAutoSyncSettings { it.copy(autoSyncEnabled = enabled) }
+                        }
+                    )
+                    if (driveAutoSyncSettings.autoUploadEnabled || driveAutoSyncSettings.autoSyncEnabled) {
+                        HorizontalDivider(
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                        SwitchSettingRow(
+                            icon = Icons.Default.Wifi,
+                            title = strings.autoUploadWifiOnly,
+                            subtitle = strings.autoUploadWifiOnlySubtitle,
+                            checked = driveAutoSyncSettings.wifiOnly,
+                            onCheckedChange = { wifi ->
+                                onUpdateAutoSyncSettings { it.copy(wifiOnly = wifi) }
+                            }
+                        )
+                    }
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
                     ToolRow(
                         icon = Icons.Default.Storage,
                         title = strings.manageDriveStorage,
@@ -271,6 +351,36 @@ fun SettingsScreen(
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    if (showTimePickerDialog) {
+        val pickerState = rememberTimePickerState(
+            initialHour = driveAutoSyncSettings.uploadHour,
+            initialMinute = driveAutoSyncSettings.uploadMinute,
+            is24Hour = false
+        )
+        AlertDialog(
+            onDismissRequest = { showTimePickerDialog = false },
+            title = { Text(strings.selectUploadTime, fontWeight = FontWeight.Bold) },
+            text = { TimePicker(state = pickerState) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showTimePickerDialog = false
+                        onUpdateAutoSyncSettings {
+                            it.copy(uploadHour = pickerState.hour, uploadMinute = pickerState.minute)
+                        }
+                    }
+                ) {
+                    Text(strings.done, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePickerDialog = false }) {
+                    Text(strings.cancel)
+                }
+            }
+        )
     }
 
     if (showDriveStorageDialog) {
@@ -435,6 +545,55 @@ private fun formatDriveSize(bytes: Long): String {
     if (mb < 1024.0) return String.format(java.util.Locale.US, "%.1f MB", mb)
     val gb = mb / 1024.0
     return String.format(java.util.Locale.US, "%.2f GB", gb)
+}
+
+@Composable
+private fun SwitchSettingRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+private fun formatTime24Or12(hour: Int, minute: Int): String {
+    val amPm = if (hour < 12) "AM" else "PM"
+    val h12 = when {
+        hour == 0 -> 12
+        hour > 12 -> hour - 12
+        else -> hour
+    }
+    return String.format(java.util.Locale.US, "%d:%02d %s", h12, minute, amPm)
 }
 
 @Composable

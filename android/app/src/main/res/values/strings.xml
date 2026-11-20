@@ -275,6 +275,16 @@
     <string name="drive_delete_failed">Failed to delete file: %1$s</string>
     <string name="drive_delete_confirm_title">Delete from Google Drive?</string>
     <string name="drive_delete_confirm_message">Remove \"%1$s\" from your Google Drive cloud storage? Your local copy will not be affected.</string>
+    <string name="auto_upload_title">Auto-upload recent PDFs</string>
+    <string name="auto_upload_subtitle">Automatically back up recent PDFs to Google Drive daily</string>
+    <string name="auto_upload_time">Upload time</string>
+    <string name="auto_upload_wifi_only">Wi-Fi only</string>
+    <string name="auto_upload_wifi_only_subtitle">Only upload and sync when connected to Wi-Fi</string>
+    <string name="auto_upload_keep_old">Keep old versions on Drive</string>
+    <string name="auto_upload_keep_old_subtitle">Keep previous copies when an edited PDF is uploaded</string>
+    <string name="auto_sync_title">Auto-sync from Drive</string>
+    <string name="auto_sync_subtitle">Fetch new files and newer reading progress after upload</string>
+    <string name="select_upload_time">Select upload time</string>
     <string name="type_text_hint">Type text…</string>
     <string name="save_pdf_dialog_title">Save PDF</string>
     <string name="save_as_new_file">Save as new file</string>

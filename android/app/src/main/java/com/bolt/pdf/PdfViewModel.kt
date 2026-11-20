@@ -2076,6 +2076,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             val account = driveSyncManager.parseSignInResult(data)
             _driveAccountEmail.value = account?.email
             if (account?.email != null) {
+                DriveAutoSyncScheduler.scheduleOrCancel(appContext)
                 _snackbarMessages.tryEmit(
                     str(R.string.msg_google_connected, account.email ?: "")
                 )
@@ -2092,10 +2093,21 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             driveSyncManager.signOut()
             _driveAccountEmail.value = null
             _driveSyncConflicts.value = emptyList()
+            DriveAutoSyncScheduler.scheduleOrCancel(appContext)
             _snackbarMessages.tryEmit(
                 str(R.string.msg_google_disconnected)
             )
         }
+    }
+
+    private val _driveAutoSyncSettings = MutableStateFlow(DriveAutoSyncPrefs.load(appContext))
+    val driveAutoSyncSettings: StateFlow<DriveAutoSyncSettings> = _driveAutoSyncSettings.asStateFlow()
+
+    fun updateDriveAutoSyncSettings(transform: (DriveAutoSyncSettings) -> DriveAutoSyncSettings) {
+        val updated = transform(_driveAutoSyncSettings.value)
+        _driveAutoSyncSettings.value = updated
+        DriveAutoSyncPrefs.save(appContext, updated)
+        DriveAutoSyncScheduler.scheduleOrCancel(appContext)
     }
 
     fun retryPendingDriveAction() {
