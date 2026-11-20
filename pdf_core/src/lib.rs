@@ -911,4 +911,33 @@ mod pdfium_e2e_tests {
         let _ = std::fs::remove_file(&pdf_path);
         let _ = std::fs::remove_file(&db_path);
     }
+
+    #[test]
+    fn e2e_images_to_pdf_orientation() {
+        let Some(pdfium_dir) = win_pdfium_dir() else { return; };
+        let tmp = std::env::temp_dir();
+        let mut paths = vec![];
+        for (n, (w, h)) in [(300u32, 200u32), (200, 300), (400, 250)].iter().enumerate() {
+            let mut img = image::RgbaImage::new(*w, *h);
+            for (_, y, px) in img.enumerate_pixels_mut() {
+                *px = if y < h / 2 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) };
+            }
+            let p = tmp.join(format!("orient_{n}.png"));
+            img.save(&p).unwrap();
+            paths.push(p.to_string_lossy().into_owned());
+        }
+        let out = tmp.join("orient_out.pdf").to_string_lossy().into_owned();
+        let db = tmp.join("orient.db").to_string_lossy().into_owned();
+        let engine = PdfEngine::new(db, pdfium_dir).expect("engine");
+        engine.images_to_pdf(paths, out.clone()).expect("images_to_pdf");
+        engine.open_from_path(out, "file://o.pdf".into(), "o.pdf".into()).expect("open");
+        for page in 0..3u32 {
+            let tile = engine.render_page(page, 100, 100, PageRotation::Deg0, false).expect("render");
+            let top = &tile.rgba_bytes[((10 * 100 + 50) * 4) as usize..][..4];
+            let bot = &tile.rgba_bytes[((90 * 100 + 50) * 4) as usize..][..4];
+            println!("page {page}: top={top:?} bottom={bot:?}");
+            assert!(top[0] > 200 && top[2] < 100, "page {page} flipped: top={top:?}");
+            assert!(bot[2] > 200 && bot[0] < 100, "page {page} flipped: bottom={bot:?}");
+        }
+    }
 }

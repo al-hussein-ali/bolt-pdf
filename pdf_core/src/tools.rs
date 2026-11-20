@@ -42,6 +42,25 @@ pub struct EditPageSpec {
 
 const MAX_IMAGE_EDGE_PX: u32 = 2400;
 
+/// Decodes an image and applies its EXIF orientation so photos appear upright.
+fn decode_oriented(path: &str) -> Result<image::DynamicImage, PdfError> {
+    use image::ImageDecoder;
+    let reader = ImageReader::open(path)
+        .map_err(|e| PdfError::EngineError(format!("Failed to open image '{path}': {e}")))?
+        .with_guessed_format()
+        .map_err(|e| PdfError::EngineError(format!("Failed to detect image format '{path}': {e}")))?;
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|e| PdfError::EngineError(format!("Failed to decode image '{path}': {e}")))?;
+    let orientation = decoder.orientation().ok();
+    let mut img = image::DynamicImage::from_decoder(decoder)
+        .map_err(|e| PdfError::EngineError(format!("Failed to decode image '{path}': {e}")))?;
+    if let Some(o) = orientation {
+        img.apply_orientation(o);
+    }
+    Ok(img)
+}
+
 pub fn ensure_parent_dir(output_path: &str) -> Result<(), PdfError> {
     if let Some(parent) = Path::new(output_path).parent() {
         if !parent.as_os_str().is_empty() {
@@ -136,12 +155,7 @@ pub fn images_to_pdf_impl(
         .map_err(|e| PdfError::EngineError(format!("Failed to create PDF: {e}")))?;
 
     for path in image_paths {
-        let mut dyn_img = ImageReader::open(path)
-            .map_err(|e| PdfError::EngineError(format!("Failed to open image '{path}': {e}")))?
-            .with_guessed_format()
-            .map_err(|e| PdfError::EngineError(format!("Failed to detect image format '{path}': {e}")))?
-            .decode()
-            .map_err(|e| PdfError::EngineError(format!("Failed to decode image '{path}': {e}")))?;
+        let mut dyn_img = decode_oriented(path)?;
         let max_dim = dyn_img.width().max(dyn_img.height());
         if max_dim > MAX_IMAGE_EDGE_PX {
             let scale = MAX_IMAGE_EDGE_PX as f32 / max_dim as f32;
@@ -288,12 +302,7 @@ pub fn apply_pdf_edits_impl(
                     .map_err(|e| PdfError::EngineError(format!("Failed to copy external page: {e}")))?;
             }
             EditPageSource::Image { path } => {
-                let mut dyn_img = ImageReader::open(path)
-                    .map_err(|e| PdfError::EngineError(format!("Failed to open image '{path}': {e}")))?
-                    .with_guessed_format()
-                    .map_err(|e| PdfError::EngineError(format!("Failed to detect image format '{path}': {e}")))?
-                    .decode()
-                    .map_err(|e| PdfError::EngineError(format!("Failed to decode image '{path}': {e}")))?;
+                let mut dyn_img = decode_oriented(path)?;
                 let max_dim = dyn_img.width().max(dyn_img.height());
                 if max_dim > MAX_IMAGE_EDGE_PX {
                     let scale = MAX_IMAGE_EDGE_PX as f32 / max_dim as f32;
