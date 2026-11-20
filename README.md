@@ -20,13 +20,13 @@
 
 ## Features
 
-- **Blazing-Fast Native Rendering** — Powered by a Rust (`pdf_core`) engine wrapping PDFium (`pdfium-render`), memory-mapped I/O (`memmap2`), an LRU page cache, and zero-copy JNI bitmap transfers (`NativeZeroCopy`) for smooth scrolling and zooming.
+- **Blazing-Fast Native Rendering** — Powered by a Rust (`pdf_core`) engine wrapping PDFium (`pdfium-render`), memory-mapped I/O (`memmap2`), an LRU tile cache, bitmap pooling, adjacent-page prefetching, GPU-accelerated night mode, and zero-copy JNI bitmap transfers (`NativeZeroCopy`) for smooth scrolling and zooming.
 - **Smart Text Selection (LTR, RTL & Mixed BiDi)** — Accurate character/word selection with BiDi support, Arabic diacritic ordering, and duplicate-glyph cleanup.
-- **Full-Text Search & Reading State** — Fast in-document search, bookmarks/favorites, and automatic reading progress persistence backed by bundled SQLite (`rusqlite`).
-- **Built-in PDF Editor** — Edit text directly on pages (with cover-background and color options), organize pages (reorder, rotate, delete, add blank pages, insert images or other PDFs), undo/redo, and save as a new file — all processed on-device in Rust (`apply_pdf_edits`).
+- **Full-Text Search & Reading State** — Fast in-document search, bookmarks/favorites, 1-tap reading-status quick filters, and automatic reading progress persistence backed by bundled SQLite (`rusqlite`).
+- **Built-in PDF Editor** — Add and position text boxes anywhere on pages (tap-to-place, drag handle, pinch-to-zoom, font size/bold/color/white-fill styling, and automatic RTL/LTR direction), organize pages (select, reorder, swap two pages, rotate, duplicate, delete, add blank pages, insert images), undo/redo, and save as a new file or overwrite — all processed on-device in Rust (`apply_pdf_edits`).
 - **On-Device PDF Tools** — Built-in PDF tools (`tools.rs`) directly inside the app with zero third-party server uploads.
 - **Built-in Markdown Reader** — Native Markdown viewer with GFM tables, callouts, task lists, clickable links, and automatic RTL/LTR direction support.
-- **Private Google Drive Cloud Sync** — Optional sync using Google Drive's isolated `appDataFolder` (`drive.appdata` scope) for Recent & On-Device PDFs, reading progress, and favorites — featuring SHA-256 deduplication, quota checks, and conflict resolution.
+- **Private Google Drive Cloud Sync** — Optional sync using Google Drive's isolated `appDataFolder` (`drive.appdata` scope) for Recent & On-Device PDFs, reading progress, and favorites — featuring SHA-256 deduplication, quota checks, conflict resolution, and in-app Drive storage management (list & delete uploaded files).
 - **Multi-Language Interface** — Built-in **English** and **Arabic (العربية)** UI with automatic RTL support, Android per-app language integration, and zero-code XML localization ([add a language](TRANSLATING.md)).
 
 ---
@@ -61,10 +61,17 @@
 │           │   ├── HomeCards.kt
 │           │   ├── HomeDialogs.kt
 │           │   └── HomeFilterSort.kt
-│           ├── ReaderScreen.kt     # PDF viewer, zoom, search & BiDi text selection
+│           ├── ReaderScreen.kt     # PDF viewer, zoom & GPU night mode
+│           ├── reader/             # Reader controls & BiDi text selection
+│           │   ├── ReaderControls.kt
+│           │   └── ReaderTextSelection.kt
 │           ├── PdfToolsScreens.kt  # On-device PDF toolkit UI
-│           ├── PdfEditorScreen.kt  # PDF editor: text editing & page organizer
-│           ├── PdfEditorModels.kt  # Editor page/overlay models
+│           ├── editor/             # Modular PDF editor: Add Text & Pages organizer
+│           │   ├── PdfEditorScreen.kt
+│           │   ├── TextEditorWorkspace.kt
+│           │   ├── PageOrganizerWorkspace.kt
+│           │   ├── EditorDialogs.kt
+│           │   └── PdfEditorModels.kt
 │           ├── MarkdownReaderScreen.kt # Built-in Markdown reader screen
 │           ├── markdown/           # Markdown parser, RTL/LTR detector & block views
 │           │   ├── MarkdownParser.kt
