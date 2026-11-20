@@ -7,10 +7,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -22,6 +24,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -31,17 +34,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
@@ -54,17 +64,18 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -89,6 +100,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -110,18 +122,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.layout.absoluteOffset
 import com.bolt.pdf.PdfViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.pdf_core.PageRotation
-import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 private enum class EditorTab {
@@ -131,11 +142,15 @@ private enum class EditorTab {
 
 private val EDITOR_TEXT_COLORS = listOf(
     0xFF111111L, // Black
-    0xFF4B5563L, // Dark Gray
+    0xFF4B5563L, // Slate Gray
     0xFF1D4ED8L, // Blue
     0xFFDC2626L, // Red
     0xFF15803DL, // Green
+    0xFFD97706L, // Amber
+    0xFF7C3AEDL, // Purple
 )
+
+private val FONT_SIZE_PRESETS = listOf(10f, 12f, 14f, 16f, 18f, 22f, 28f, 36f)
 
 private fun rotationFromDegrees(deg: Int): PageRotation = when (((deg % 360) + 360) % 360) {
     90 -> PageRotation.DEG90
@@ -175,10 +190,16 @@ fun PdfEditorScreen(
     var undoStack by remember(session.fileHash, session.sourceUri) {
         mutableStateOf<List<List<EditorPageItem>>>(emptyList())
     }
+    var redoStack by remember(session.fileHash, session.sourceUri) {
+        mutableStateOf<List<List<EditorPageItem>>>(emptyList())
+    }
     var activeTab by remember(session.fileHash, session.sourceUri) {
         mutableStateOf(EditorTab.EDIT_TEXT)
     }
     var currentPageIdx by remember(session.fileHash, session.sourceUri) {
+        mutableIntStateOf(session.initialPageIndex.coerceIn(0, (session.dimensions.size - 1).coerceAtLeast(0)))
+    }
+    var selectedOrganizerIdx by remember(session.fileHash, session.sourceUri) {
         mutableIntStateOf(session.initialPageIndex.coerceIn(0, (session.dimensions.size - 1).coerceAtLeast(0)))
     }
     var activeTextBoxId by remember(session.fileHash, session.sourceUri) {
@@ -186,16 +207,21 @@ fun PdfEditorScreen(
     }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
+    var swapSourceIdx by remember { mutableStateOf<Int?>(null) }
     var pendingNewFileName by remember { mutableStateOf<String?>(null) }
     var pendingNewFilePages by remember { mutableStateOf<List<EditorPageItem>?>(null) }
 
     val hasUnsavedChanges = undoStack.isNotEmpty()
 
     fun commitPagesChange(newPages: List<EditorPageItem>) {
-        undoStack = (undoStack + listOf(pages)).takeLast(25)
+        undoStack = (undoStack + listOf(pages)).takeLast(30)
+        redoStack = emptyList()
         pages = newPages
         if (currentPageIdx >= newPages.size) {
             currentPageIdx = (newPages.size - 1).coerceAtLeast(0)
+        }
+        if (selectedOrganizerIdx >= newPages.size) {
+            selectedOrganizerIdx = (newPages.size - 1).coerceAtLeast(0)
         }
     }
 
@@ -209,6 +235,41 @@ fun PdfEditorScreen(
         } else {
             pages = updated
         }
+    }
+
+    fun cleanupEmptyAndDeselect() {
+        val id = activeTextBoxId ?: return
+        val currentPage = pages.getOrNull(currentPageIdx)
+        val box = currentPage?.textEdits?.firstOrNull { it.id == id }
+        if (box != null && box.text.isBlank()) {
+            // Drop empty placeholder without polluting undo history
+            val cleaned = pages.toMutableList()
+            cleaned[currentPageIdx] = currentPage.copy(
+                textEdits = currentPage.textEdits.filterNot { it.id == id }
+            )
+            pages = cleaned
+        }
+        activeTextBoxId = null
+    }
+
+    fun performUndo() {
+        val prev = undoStack.lastOrNull() ?: return
+        redoStack = (redoStack + listOf(pages)).takeLast(30)
+        undoStack = undoStack.dropLast(1)
+        pages = prev
+        activeTextBoxId = null
+        currentPageIdx = currentPageIdx.coerceIn(0, (prev.size - 1).coerceAtLeast(0))
+        selectedOrganizerIdx = selectedOrganizerIdx.coerceIn(0, (prev.size - 1).coerceAtLeast(0))
+    }
+
+    fun performRedo() {
+        val next = redoStack.lastOrNull() ?: return
+        undoStack = (undoStack + listOf(pages)).takeLast(30)
+        redoStack = redoStack.dropLast(1)
+        pages = next
+        activeTextBoxId = null
+        currentPageIdx = currentPageIdx.coerceIn(0, (next.size - 1).coerceAtLeast(0))
+        selectedOrganizerIdx = selectedOrganizerIdx.coerceIn(0, (next.size - 1).coerceAtLeast(0))
     }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
@@ -248,31 +309,9 @@ fun PdfEditorScreen(
                 )
             }
             withContext(Dispatchers.Main) {
+                val newIdx = pages.size
                 commitPagesChange(pages + newItems)
-            }
-        }
-    }
-
-    val insertPdfLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val count = viewModel.resolvePdfPageCount(uri, null)
-            if (count != null && count > 0) {
-                val name = viewModel.queryDisplayName(uri) ?: "Document.pdf"
-                val inserted = (0 until count).map { idx ->
-                    EditorPageItem(
-                        kind = EditorPageKind.ExternalPdf(
-                            uri = uri,
-                            pageIndex = idx,
-                            displayName = name
-                        )
-                    )
-                }
-                commitPagesChange(pages + inserted)
-            } else {
-                snackbarHostState.showSnackbar(strings.unableToReadPageCount)
+                selectedOrganizerIdx = newIdx
             }
         }
     }
@@ -318,23 +357,21 @@ fun PdfEditorScreen(
                     }
                 },
                 actions = {
-                    if (undoStack.isNotEmpty()) {
-                        IconButton(
-                            onClick = {
-                                val prev = undoStack.lastOrNull() ?: return@IconButton
-                                undoStack = undoStack.dropLast(1)
-                                pages = prev
-                                activeTextBoxId = null
-                                currentPageIdx = currentPageIdx.coerceIn(0, (prev.size - 1).coerceAtLeast(0))
-                            },
-                            enabled = !isSaving
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = strings.undo)
-                        }
+                    IconButton(
+                        onClick = { performUndo() },
+                        enabled = !isSaving && undoStack.isNotEmpty()
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = strings.undo)
+                    }
+                    IconButton(
+                        onClick = { performRedo() },
+                        enabled = !isSaving && redoStack.isNotEmpty()
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = strings.redo)
                     }
                     Button(
                         onClick = {
-                            activeTextBoxId = null
+                            cleanupEmptyAndDeselect()
                             showSaveDialog = true
                         },
                         enabled = !isSaving && pages.isNotEmpty(),
@@ -374,7 +411,8 @@ fun PdfEditorScreen(
                     Tab(
                         selected = activeTab == EditorTab.ORGANIZE_PAGES,
                         onClick = {
-                            activeTextBoxId = null
+                            cleanupEmptyAndDeselect()
+                            selectedOrganizerIdx = currentPageIdx.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
                             activeTab = EditorTab.ORGANIZE_PAGES
                         },
                         text = { Text(strings.organizePagesTab, fontWeight = FontWeight.SemiBold) },
@@ -392,8 +430,21 @@ fun PdfEditorScreen(
                                 totalPages = pages.size,
                                 activeTextBoxId = activeTextBoxId,
                                 viewModel = viewModel,
-                                onSelectTextBox = { id -> activeTextBoxId = id },
-                                onAddOrActivateTextBox = { newBox ->
+                                onSelectTextBox = { id ->
+                                    if (id == null) {
+                                        cleanupEmptyAndDeselect()
+                                    } else {
+                                        if (activeTextBoxId != id) {
+                                            cleanupEmptyAndDeselect()
+                                            // Snapshot before editing an existing box
+                                            undoStack = (undoStack + listOf(pages)).takeLast(30)
+                                            redoStack = emptyList()
+                                            activeTextBoxId = id
+                                        }
+                                    }
+                                },
+                                onAddTextBox = { newBox ->
+                                    cleanupEmptyAndDeselect()
                                     updateCurrentPage(
                                         transform = { p -> p.copy(textEdits = p.textEdits + newBox) },
                                         pushUndo = true
@@ -423,22 +474,15 @@ fun PdfEditorScreen(
                                 },
                                 onPrevPage = {
                                     if (currentPageIdx > 0) {
-                                        activeTextBoxId = null
+                                        cleanupEmptyAndDeselect()
                                         currentPageIdx -= 1
                                     }
                                 },
                                 onNextPage = {
                                     if (currentPageIdx < pages.lastIndex) {
-                                        activeTextBoxId = null
+                                        cleanupEmptyAndDeselect()
                                         currentPageIdx += 1
                                     }
-                                },
-                                onRotateCurrentPage = {
-                                    activeTextBoxId = null
-                                    updateCurrentPage(
-                                        transform = { p -> p.copy(rotationDegrees = (p.rotationDegrees + 90) % 360) },
-                                        pushUndo = true
-                                    )
                                 },
                                 modifier = Modifier.weight(1f)
                             )
@@ -448,7 +492,11 @@ fun PdfEditorScreen(
                     EditorTab.ORGANIZE_PAGES -> {
                         PageOrganizerWorkspace(
                             pages = pages,
+                            selectedIndex = selectedOrganizerIdx.coerceIn(0, (pages.size - 1).coerceAtLeast(0)),
                             viewModel = viewModel,
+                            onSelectPage = { idx ->
+                                selectedOrganizerIdx = idx
+                            },
                             onOpenPageInTextEditor = { idx ->
                                 currentPageIdx = idx
                                 activeTextBoxId = null
@@ -460,6 +508,7 @@ fun PdfEditorScreen(
                                     val item = mutable.removeAt(from)
                                     mutable.add(to, item)
                                     commitPagesChange(mutable)
+                                    selectedOrganizerIdx = to
                                 }
                             },
                             onRotatePage = { idx ->
@@ -468,6 +517,11 @@ fun PdfEditorScreen(
                                     val item = mutable[idx]
                                     mutable[idx] = item.copy(rotationDegrees = (item.rotationDegrees + 90) % 360)
                                     commitPagesChange(mutable)
+                                }
+                            },
+                            onSwapPageRequest = { idx ->
+                                if (idx in pages.indices) {
+                                    swapSourceIdx = idx
                                 }
                             },
                             onDuplicatePage = { idx ->
@@ -481,6 +535,7 @@ fun PdfEditorScreen(
                                     )
                                     mutable.add(idx + 1, copy)
                                     commitPagesChange(mutable)
+                                    selectedOrganizerIdx = idx + 1
                                 }
                             },
                             onDeletePage = { idx ->
@@ -492,21 +547,21 @@ fun PdfEditorScreen(
                                     val mutable = pages.toMutableList()
                                     mutable.removeAt(idx)
                                     commitPagesChange(mutable)
+                                    selectedOrganizerIdx = idx.coerceAtMost(mutable.lastIndex)
                                 }
                             },
                             onAddBlankPage = {
-                                val refPage = pages.lastOrNull()
+                                val refPage = pages.getOrNull(selectedOrganizerIdx) ?: pages.lastOrNull()
                                 val w = refPage?.effectiveWidthPts() ?: 595f
                                 val h = refPage?.effectiveHeightPts() ?: 842f
+                                val newIdx = pages.size
                                 commitPagesChange(
                                     pages + EditorPageItem(kind = EditorPageKind.Blank(w, h))
                                 )
+                                selectedOrganizerIdx = newIdx
                             },
                             onInsertImages = {
                                 insertImagesLauncher.launch(arrayOf("image/*"))
-                            },
-                            onInsertPdf = {
-                                insertPdfLauncher.launch(arrayOf("application/pdf"))
                             },
                             modifier = Modifier.weight(1f)
                         )
@@ -536,6 +591,28 @@ fun PdfEditorScreen(
                     }
                 }
             }
+        }
+    }
+
+    swapSourceIdx?.let { sourceIdx ->
+        if (sourceIdx in pages.indices) {
+            SwapPagesDialog(
+                sourcePageNumber = sourceIdx + 1,
+                totalPages = pages.size,
+                onDismiss = { swapSourceIdx = null },
+                onConfirmSwap = { targetPageNumber ->
+                    val targetIdx = targetPageNumber - 1
+                    if (targetIdx in pages.indices && targetIdx != sourceIdx) {
+                        val mutable = pages.toMutableList()
+                        val temp = mutable[sourceIdx]
+                        mutable[sourceIdx] = mutable[targetIdx]
+                        mutable[targetIdx] = temp
+                        commitPagesChange(mutable)
+                        selectedOrganizerIdx = targetIdx
+                    }
+                    swapSourceIdx = null
+                }
+            )
         }
     }
 
@@ -583,6 +660,7 @@ fun PdfEditorScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TextEditorWorkspace(
     page: EditorPageItem,
@@ -591,44 +669,22 @@ private fun TextEditorWorkspace(
     activeTextBoxId: String?,
     viewModel: PdfViewModel,
     onSelectTextBox: (String?) -> Unit,
-    onAddOrActivateTextBox: (EditorTextBox) -> Unit,
+    onAddTextBox: (EditorTextBox) -> Unit,
     onUpdateTextBox: (EditorTextBox, Boolean) -> Unit,
     onDeleteTextBox: (String) -> Unit,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
-    onRotateCurrentPage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val strings = LocalAppStrings.current
     val density = LocalDensity.current
     val context = LocalContext.current
-
-    var detectedLines by remember(page.id, page.rotationDegrees) {
-        mutableStateOf<List<DetectedTextLine>>(emptyList())
-    }
-
-    // Load PDF text lines for tap-to-edit on original pages
-    LaunchedEffect(page.id, page.kind, page.rotationDegrees) {
-        val kind = page.kind
-        if (kind is EditorPageKind.Original) {
-            val content = viewModel.getPageTextContent(
-                pageIndex = kind.pageIndex,
-                rotation = rotationFromDegrees(page.rotationDegrees)
-            )
-            detectedLines = if (content != null) {
-                detectEditableTextLines(content, page.effectiveHeightPts())
-            } else {
-                emptyList()
-            }
-        } else {
-            detectedLines = emptyList()
-        }
-    }
+    val scrollState = rememberScrollState()
 
     val activeBox = page.textEdits.firstOrNull { it.id == activeTextBoxId }
+    var showFontMenu by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Helpful hint banner when no text box is active
         if (activeBox == null) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -649,7 +705,7 @@ private fun TextEditorWorkspace(
                 .weight(1f)
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainer)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .padding(16.dp),
             contentAlignment = Alignment.TopCenter
         ) {
@@ -672,58 +728,23 @@ private fun TextEditorWorkspace(
                     modifier = Modifier
                         .fillMaxSize()
                         .clipToBounds()
-                        .pointerInput(page.id, page.textEdits, detectedLines, pageWidthPx, pageHeightPx) {
+                        .pointerInput(page.id, page.textEdits, pageWidthPx, pageHeightPx) {
                             detectTapGestures { offset ->
                                 val nx = (offset.x / pageWidthPx.toFloat()).coerceIn(0f, 1f)
                                 val ny = (offset.y / pageHeightPx.toFloat()).coerceIn(0f, 1f)
 
-                                // 1. Hit existing user text boxes first
                                 val hitExisting = page.textEdits.lastOrNull { box ->
-                                    nx in (box.left - 0.015f)..(box.right + 0.015f) &&
-                                        ny in (box.top - 0.015f)..(box.bottom + 0.015f)
+                                    nx in (box.left - 0.02f)..(box.right + 0.02f) &&
+                                        ny in (box.top - 0.02f)..(box.bottom + 0.05f)
                                 }
                                 if (hitExisting != null) {
                                     onSelectTextBox(hitExisting.id)
-                                    return@detectTapGestures
+                                } else {
+                                    onSelectTextBox(null)
                                 }
-
-                                // 2. Hit detected PDF text line -> open live inline editor with cursor!
-                                val hitLine = detectedLines.firstOrNull { line ->
-                                    nx in (line.left - 0.02f)..(line.right + 0.02f) &&
-                                        ny in (line.top - 0.014f)..(line.bottom + 0.014f)
-                                }
-                                if (hitLine != null) {
-                                    val padX = 0.005f
-                                    val padY = 0.004f
-                                    val boxLeft = (hitLine.left - padX).coerceIn(0f, 0.92f)
-                                    val boxTop = (hitLine.top - padY).coerceIn(0f, 0.94f)
-                                    val boxRight = max(hitLine.right + 0.06f, boxLeft + 0.25f).coerceAtMost(0.98f)
-                                    val boxBottom = max(hitLine.bottom + padY * 2f, boxTop + 0.04f).coerceAtMost(0.98f)
-                                    val newBox = EditorTextBox(
-                                        text = hitLine.text,
-                                        left = boxLeft,
-                                        top = boxTop,
-                                        right = boxRight,
-                                        bottom = boxBottom,
-                                        coverLeft = (hitLine.left - padX).coerceIn(0f, 1f),
-                                        coverTop = (hitLine.top - padY).coerceIn(0f, 1f),
-                                        coverRight = (hitLine.right + padX).coerceIn(0f, 1f),
-                                        coverBottom = (hitLine.bottom + padY).coerceIn(0f, 1f),
-                                        coverBackground = true,
-                                        fontSizePts = hitLine.estimatedFontSizePts,
-                                        colorArgb = 0xFF111111L,
-                                        isBold = false,
-                                    )
-                                    onAddOrActivateTextBox(newBox)
-                                    return@detectTapGestures
-                                }
-
-                                // 3. Tap empty area -> dismiss active text box focus
-                                onSelectTextBox(null)
                             }
                         }
                 ) {
-                    // Rendered base page background
                     EditorPagePreviewBitmap(
                         page = page,
                         targetWidthPx = pageWidthPx.coerceAtMost(1440),
@@ -733,56 +754,28 @@ private fun TextEditorWorkspace(
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    // Subtle highlight outlines over detected editable text lines when idle
-                    if (activeBox == null) {
-                        for (line in detectedLines) {
-                            val lx = (line.left * pageWidthPx).roundToInt()
-                            val ly = (line.top * pageHeightPx).roundToInt()
-                            val lw = with(density) { ((line.right - line.left) * pageWidthPx).coerceAtLeast(4f).toDp() }
-                            val lh = with(density) { ((line.bottom - line.top) * pageHeightPx).coerceAtLeast(4f).toDp() }
-                            Box(
-                                modifier = Modifier
-                                    .align(AbsoluteAlignment.TopLeft)
-                                    .absoluteOffset { IntOffset(lx, ly) }
-                                    .size(width = lw, height = lh)
-                                    .border(0.5.dp, Color(0x281976D2), RoundedCornerShape(2.dp))
-                            )
-                        }
-                    }
-
-                    // Render each user text edit / replacement box directly on the page
                     for (box in page.textEdits) {
                         val isActive = box.id == activeTextBoxId
-                        // Draw white cover over the original PDF text if applicable
-                        if (box.coverBackground &&
-                            box.coverLeft != null && box.coverTop != null &&
-                            box.coverRight != null && box.coverBottom != null
-                        ) {
-                            val cx = (box.coverLeft * pageWidthPx).roundToInt()
-                            val cy = (box.coverTop * pageHeightPx).roundToInt()
-                            val cw = with(density) { ((box.coverRight - box.coverLeft) * pageWidthPx).coerceAtLeast(4f).toDp() }
-                            val ch = with(density) { ((box.coverBottom - box.coverTop) * pageHeightPx).coerceAtLeast(4f).toDp() }
-                            Box(
-                                modifier = Modifier
-                                    .align(AbsoluteAlignment.TopLeft)
-                                    .absoluteOffset { IntOffset(cx, cy) }
-                                    .size(width = cw, height = ch)
-                                    .background(Color.White)
-                            )
-                        }
-
                         val bx = (box.left * pageWidthPx).roundToInt()
                         val by = (box.top * pageHeightPx).roundToInt()
-                        val bwPx = ((box.right - box.left) * pageWidthPx).coerceAtLeast(48f)
-                        val bhPx = ((box.bottom - box.top) * pageHeightPx).coerceAtLeast(24f)
+                        val bwPx = ((box.right - box.left) * pageWidthPx).coerceAtLeast(64f)
                         val bwDp = with(density) { bwPx.toDp() }
-                        val bhDp = with(density) { bhPx.toDp() }
                         val fontSp = with(density) { (box.fontSizePts * ptsToPx).toSp() }
 
                         val focusRequester = remember(box.id) { FocusRequester() }
+                        val bringIntoViewRequester = remember(box.id) { BringIntoViewRequester() }
+
                         LaunchedEffect(isActive) {
                             if (isActive) {
                                 runCatching { focusRequester.requestFocus() }
+                                delay(120)
+                                runCatching { bringIntoViewRequester.bringIntoView() }
+                            }
+                        }
+
+                        LaunchedEffect(isActive, box.text, box.top) {
+                            if (isActive) {
+                                runCatching { bringIntoViewRequester.bringIntoView() }
                             }
                         }
 
@@ -791,14 +784,16 @@ private fun TextEditorWorkspace(
                                 .align(AbsoluteAlignment.TopLeft)
                                 .absoluteOffset { IntOffset(bx, by) }
                                 .width(bwDp)
+                                .wrapContentHeight()
+                                .bringIntoViewRequester(bringIntoViewRequester)
                                 .background(
                                     color = if (box.coverBackground) Color.White else Color.Transparent,
-                                    shape = RoundedCornerShape(3.dp)
+                                    shape = RoundedCornerShape(4.dp)
                                 )
                                 .border(
-                                    width = if (isActive) 1.5.dp else 0.75.dp,
-                                    color = if (isActive) Color(0xFF1976D2) else Color(0x661976D2),
-                                    shape = RoundedCornerShape(3.dp)
+                                    width = if (isActive) 1.75.dp else 0.75.dp,
+                                    color = if (isActive) MaterialTheme.colorScheme.primary else Color(0x661976D2),
+                                    shape = RoundedCornerShape(4.dp)
                                 )
                                 .pointerInput(box.id, pageWidthPx, pageHeightPx) {
                                     detectDragGestures(
@@ -823,13 +818,14 @@ private fun TextEditorWorkspace(
                                         }
                                     )
                                 }
-                                .padding(horizontal = 3.dp, vertical = 2.dp)
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
                         ) {
                             val textStyle = TextStyle(
                                 color = Color(box.colorArgb),
                                 fontSize = fontSp,
                                 fontWeight = if (box.isBold) FontWeight.Bold else FontWeight.Normal,
-                                lineHeight = fontSp * 1.2f
+                                lineHeight = fontSp * 1.25f,
+                                textDirection = TextDirection.Content
                             )
                             if (isActive) {
                                 BasicTextField(
@@ -838,7 +834,7 @@ private fun TextEditorWorkspace(
                                         onUpdateTextBox(box.copy(text = newText), false)
                                     },
                                     textStyle = textStyle,
-                                    cursorBrush = SolidColor(Color(0xFF1976D2)),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .focusRequester(focusRequester),
@@ -860,7 +856,7 @@ private fun TextEditorWorkspace(
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(bhDp.coerceAtLeast(20.dp))
+                                        .clickable { onSelectTextBox(box.id) }
                                 )
                             }
                         }
@@ -869,117 +865,183 @@ private fun TextEditorWorkspace(
             }
         }
 
-        // Bottom bar: Formatting toolbar when a text box is active, otherwise page navigation + Add Text
+        // Bottom bar: Two-row clean formatting toolbar when active, otherwise page navigation + Add Text
         Surface(
             tonalElevation = 4.dp,
-            shadowElevation = 6.dp,
+            shadowElevation = 8.dp,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
             if (activeBox != null) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Font size - / value / +
-                    IconButton(
-                        onClick = {
-                            onUpdateTextBox(
-                                activeBox.copy(fontSizePts = (activeBox.fontSizePts - 2f).coerceAtLeast(6f)),
-                                true
-                            )
-                        },
-                        modifier = Modifier.size(36.dp)
+                    // Row 1: Font size, Bold, White fill, Delete, Done
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
-                    Text(
-                        text = "${activeBox.fontSizePts.roundToInt()}pt",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    IconButton(
-                        onClick = {
-                            onUpdateTextBox(
-                                activeBox.copy(fontSizePts = (activeBox.fontSizePts + 2f).coerceAtMost(72f)),
-                                true
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = {
+                                            onUpdateTextBox(
+                                                activeBox.copy(fontSizePts = (activeBox.fontSizePts - 2f).coerceAtLeast(8f)),
+                                                true
+                                            )
+                                        },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                    Box {
+                                        Text(
+                                            text = "${activeBox.fontSizePts.roundToInt()}pt",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            modifier = Modifier
+                                                .clickable { showFontMenu = true }
+                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        )
+                                        DropdownMenu(
+                                            expanded = showFontMenu,
+                                            onDismissRequest = { showFontMenu = false }
+                                        ) {
+                                            FONT_SIZE_PRESETS.forEach { preset ->
+                                                DropdownMenuItem(
+                                                    text = { Text("${preset.roundToInt()} pt") },
+                                                    onClick = {
+                                                        showFontMenu = false
+                                                        onUpdateTextBox(activeBox.copy(fontSizePts = preset), true)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = {
+                                            onUpdateTextBox(
+                                                activeBox.copy(fontSizePts = (activeBox.fontSizePts + 2f).coerceAtMost(72f)),
+                                                true
+                                            )
+                                        },
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+
+                            FilterChip(
+                                selected = activeBox.isBold,
+                                onClick = { onUpdateTextBox(activeBox.copy(isBold = !activeBox.isBold), true) },
+                                label = {
+                                    Icon(
+                                        Icons.Default.FormatBold,
+                                        contentDescription = strings.bold,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             )
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    }
 
-                    // Bold toggle
-                    FilterChip(
-                        selected = activeBox.isBold,
-                        onClick = { onUpdateTextBox(activeBox.copy(isBold = !activeBox.isBold), true) },
-                        label = { Icon(Icons.Default.FormatBold, contentDescription = strings.bold, modifier = Modifier.size(18.dp)) }
-                    )
+                            FilterChip(
+                                selected = activeBox.coverBackground,
+                                onClick = { onUpdateTextBox(activeBox.copy(coverBackground = !activeBox.coverBackground), true) },
+                                label = {
+                                    Icon(
+                                        Icons.Default.FormatColorFill,
+                                        contentDescription = strings.coverBackground,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            )
+                        }
 
-                    // White background cover toggle
-                    FilterChip(
-                        selected = activeBox.coverBackground,
-                        onClick = { onUpdateTextBox(activeBox.copy(coverBackground = !activeBox.coverBackground), true) },
-                        label = { Text(strings.coverBackground, style = MaterialTheme.typography.labelSmall) },
-                        leadingIcon = { Icon(Icons.Default.FormatColorFill, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    )
-
-                    // Color swatches
-                    EDITOR_TEXT_COLORS.forEach { argb ->
-                        val selected = activeBox.colorArgb == argb
-                        Box(
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(Color(argb))
-                                .border(
-                                    width = if (selected) 2.5.dp else 1.dp,
-                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                    shape = CircleShape
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            IconButton(
+                                onClick = { onDeleteTextBox(activeBox.id) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = strings.delete,
+                                    tint = MaterialTheme.colorScheme.error
                                 )
-                                .clickable { onUpdateTextBox(activeBox.copy(colorArgb = argb), true) }
-                        )
+                            }
+
+                            FilledTonalButton(
+                                onClick = { onSelectTextBox(null) },
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(strings.done, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
 
-                    // Delete box
-                    IconButton(
-                        onClick = { onDeleteTextBox(activeBox.id) },
-                        modifier = Modifier.size(36.dp)
+                    // Row 2: Clean, well-spaced color swatches
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Default.DeleteOutline,
-                            contentDescription = strings.delete,
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-
-                    // Done
-                    FilledTonalButton(
-                        onClick = { onSelectTextBox(null) },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(strings.done)
+                        EDITOR_TEXT_COLORS.forEach { argb ->
+                            val selected = activeBox.colorArgb == argb
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(argb))
+                                    .border(
+                                        width = if (selected) 2.5.dp else 1.dp,
+                                        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                        shape = CircleShape
+                                    )
+                                    .clickable { onUpdateTextBox(activeBox.copy(colorArgb = argb), true) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (selected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             } else {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onPrevPage, enabled = pageNumber > 1) {
-                            Icon(Icons.Default.KeyboardArrowLeft, contentDescription = strings.previous)
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = strings.previous)
                         }
                         Text(
                             text = strings.pageOfTotal(pageNumber, totalPages),
@@ -987,38 +1049,33 @@ private fun TextEditorWorkspace(
                             fontWeight = FontWeight.SemiBold
                         )
                         IconButton(onClick = onNextPage, enabled = pageNumber < totalPages) {
-                            Icon(Icons.Default.KeyboardArrowRight, contentDescription = strings.next)
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = strings.next)
                         }
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Button(
+                        onClick = {
+                            val stagger = (page.textEdits.size % 5) * 0.11f
+                            val topPos = (0.14f + stagger).coerceAtMost(0.75f)
+                            val newBox = EditorTextBox(
+                                text = "",
+                                left = 0.10f,
+                                top = topPos,
+                                right = 0.86f,
+                                bottom = (topPos + 0.08f).coerceAtMost(0.95f),
+                                coverBackground = false,
+                                fontSizePts = 16f,
+                                colorArgb = 0xFF111111L,
+                                isBold = false,
+                            )
+                            onAddTextBox(newBox)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        IconButton(onClick = onRotateCurrentPage) {
-                            Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = strings.rotatePage)
-                        }
-                        FilledTonalButton(
-                            onClick = {
-                                val newBox = EditorTextBox(
-                                    text = "",
-                                    left = 0.12f,
-                                    top = 0.18f,
-                                    right = 0.72f,
-                                    bottom = 0.25f,
-                                    coverBackground = false,
-                                    fontSizePts = 15f,
-                                    colorArgb = 0xFF111111L,
-                                    isBold = false,
-                                )
-                                onAddOrActivateTextBox(newBox)
-                            },
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(strings.addText, fontWeight = FontWeight.SemiBold)
-                        }
+                        Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(strings.addText, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -1026,48 +1083,79 @@ private fun TextEditorWorkspace(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PageOrganizerWorkspace(
     pages: List<EditorPageItem>,
+    selectedIndex: Int,
     viewModel: PdfViewModel,
+    onSelectPage: (Int) -> Unit,
     onOpenPageInTextEditor: (Int) -> Unit,
     onMovePage: (Int, Int) -> Unit,
     onRotatePage: (Int) -> Unit,
+    onSwapPageRequest: (Int) -> Unit,
     onDuplicatePage: (Int) -> Unit,
     onDeletePage: (Int) -> Unit,
     onAddBlankPage: () -> Unit,
     onInsertImages: () -> Unit,
-    onInsertPdf: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val strings = LocalAppStrings.current
     val context = LocalContext.current
+    val safeSelected = selectedIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
 
     Column(modifier = modifier.fillMaxSize()) {
+        // Subtle hint bar
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = strings.selectPageHint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 156.dp),
+            columns = GridCells.Adaptive(minSize = 148.dp),
             contentPadding = PaddingValues(14.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.weight(1f)
         ) {
             itemsIndexed(pages, key = { _, item -> item.id }) { index, item ->
+                val isSelected = index == safeSelected
                 Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerLow
+                        }
+                    ),
+                    border = BorderStroke(
+                        width = if (isSelected) 2.dp else 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpenPageInTextEditor(index) }
+                        .clip(RoundedCornerShape(14.dp))
+                        .combinedClickable(
+                            onClick = { onSelectPage(index) },
+                            onDoubleClick = { onOpenPageInTextEditor(index) }
+                        )
                 ) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .aspectRatio(0.75f)
-                                .clip(RoundedCornerShape(8.dp))
+                                .aspectRatio(0.74f)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(Color.White)
-                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+                                .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             EditorPagePreviewBitmap(
@@ -1082,7 +1170,11 @@ private fun PageOrganizerWorkspace(
                             // Page number pill
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+                                },
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(6.dp)
@@ -1091,22 +1183,26 @@ private fun PageOrganizerWorkspace(
                                     text = "${index + 1}",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
                             }
 
-                            // Status badge (Edited / Blank / Image / Inserted)
+                            // Status badge (Edited / Blank / Image)
                             val badgeText = when {
                                 item.textEdits.isNotEmpty() -> strings.editedBadge
                                 item.kind is EditorPageKind.Blank -> strings.blankPageLabel
                                 item.kind is EditorPageKind.Image -> strings.imagePageLabel
-                                item.kind is EditorPageKind.ExternalPdf -> strings.insertedPageLabel
                                 else -> null
                             }
                             if (badgeText != null) {
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
                                     modifier = Modifier
                                         .align(Alignment.TopEnd)
                                         .padding(6.dp)
@@ -1114,58 +1210,11 @@ private fun PageOrganizerWorkspace(
                                     Text(
                                         text = badgeText,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                                         fontWeight = FontWeight.SemiBold,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // Per-page quick action row: Move Back | Move Forward | Rotate | Duplicate | Delete
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(
-                                onClick = { onMovePage(index, index - 1) },
-                                enabled = index > 0,
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.moveLeft, modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(
-                                onClick = { onMovePage(index, index + 1) },
-                                enabled = index < pages.lastIndex,
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = strings.moveRight, modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(
-                                onClick = { onRotatePage(index) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = strings.rotatePage, modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(
-                                onClick = { onDuplicatePage(index) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = strings.duplicatePage, modifier = Modifier.size(16.dp))
-                            }
-                            IconButton(
-                                onClick = { onDeletePage(index) },
-                                modifier = Modifier.size(30.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.DeleteOutline,
-                                    contentDescription = strings.delete,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp)
-                                )
                             }
                         }
                     }
@@ -1173,51 +1222,242 @@ private fun PageOrganizerWorkspace(
             }
         }
 
-        // Bottom Organizer Actions
+        // Bottom Contextual Page Toolbar + Add Page Actions
         Surface(
             tonalElevation = 4.dp,
-            shadowElevation = 6.dp,
+            shadowElevation = 8.dp,
             color = MaterialTheme.colorScheme.surface,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(
-                    onClick = onAddBlankPage,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(strings.addBlankPage)
+                if (pages.isNotEmpty()) {
+                    // Selected-page action strip
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Selected page badge
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    text = strings.pageLabel(safeSelected + 1),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+
+                            VerticalDivider(
+                                modifier = Modifier
+                                    .height(22.dp)
+                                    .padding(horizontal = 2.dp)
+                            )
+
+                            IconButton(
+                                onClick = { onMovePage(safeSelected, safeSelected - 1) },
+                                enabled = safeSelected > 0,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = strings.moveLeft, modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = { onMovePage(safeSelected, safeSelected + 1) },
+                                enabled = safeSelected < pages.lastIndex,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = strings.moveRight, modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = { onRotatePage(safeSelected) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = strings.rotatePage, modifier = Modifier.size(18.dp))
+                            }
+
+                            // Swap button showing selected page number
+                            FilledTonalButton(
+                                onClick = { onSwapPageRequest(safeSelected) },
+                                enabled = pages.size > 1,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "${strings.swapPages} #${safeSelected + 1}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { onDuplicatePage(safeSelected) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = strings.duplicatePage, modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = { onOpenPageInTextEditor(safeSelected) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.TextFields, contentDescription = strings.addText, modifier = Modifier.size(18.dp))
+                            }
+
+                            IconButton(
+                                onClick = { onDeletePage(safeSelected) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = strings.delete,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
-                OutlinedButton(
-                    onClick = onInsertImages,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+
+                // Bottom add actions: Blank page & Add images only
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(strings.insertImages)
-                }
-                OutlinedButton(
-                    onClick = onInsertPdf,
-                    shape = RoundedCornerShape(10.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(strings.insertPdf)
+                    OutlinedButton(
+                        onClick = onAddBlankPage,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(strings.addBlankPage, fontWeight = FontWeight.SemiBold)
+                    }
+                    FilledTonalButton(
+                        onClick = onInsertImages,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(strings.insertImages, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun SwapPagesDialog(
+    sourcePageNumber: Int,
+    totalPages: Int,
+    onDismiss: () -> Unit,
+    onConfirmSwap: (targetPageNumber: Int) -> Unit,
+) {
+    val strings = LocalAppStrings.current
+    var targetInput by remember(sourcePageNumber) { mutableStateOf("") }
+    val parsedTarget = targetInput.trim().toIntOrNull()
+    val isValidRange = parsedTarget != null && parsedTarget in 1..totalPages
+    val isDifferent = parsedTarget != sourcePageNumber
+    val canSwap = isValidRange && isDifferent
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.swapPagesTitle, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = strings.currentPageLabel,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Text(
+                                text = strings.pageLabel(sourcePageNumber),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = targetInput,
+                    onValueChange = { input ->
+                        if (input.length <= 5 && input.all { it.isDigit() }) {
+                            targetInput = input
+                        }
+                    },
+                    label = { Text(strings.swapWithPageLabel(totalPages)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = targetInput.isNotEmpty() && !canSwap,
+                    supportingText = {
+                        when {
+                            targetInput.isEmpty() -> Unit
+                            !isValidRange -> Text(strings.invalidPageNumber(totalPages))
+                            !isDifferent -> Text(strings.samePageSwapHint)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { parsedTarget?.let(onConfirmSwap) },
+                enabled = canSwap
+            ) {
+                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(strings.swapPages)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(strings.cancel)
+            }
+        }
+    )
 }
 
 @Composable
@@ -1374,7 +1614,6 @@ private fun SaveEditedPdfDialog(
         title = { Text(strings.savePdfDialogTitle, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                // Option 1: Save as new file
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = if (!replaceMode) {
@@ -1411,7 +1650,6 @@ private fun SaveEditedPdfDialog(
                     }
                 }
 
-                // Option 2: Replace current file
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = if (replaceMode) {
@@ -1463,7 +1701,6 @@ private fun SaveEditedPdfDialog(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // File name input (keep old name or type new name)
                 OutlinedTextField(
                     value = fileNameInput,
                     onValueChange = { fileNameInput = it },

@@ -239,7 +239,7 @@
 
     <!-- PDF Editor -->
     <string name="edit_pdf">Edit PDF</string>
-    <string name="edit_text_tab">Edit Text</string>
+    <string name="edit_text_tab">Add Text</string>
     <string name="organize_pages_tab">Pages</string>
     <string name="save">Save</string>
     <string name="saving_pdf">Saving PDF…</string>
@@ -252,10 +252,18 @@
     <string name="move_left">Move back</string>
     <string name="move_right">Move forward</string>
     <string name="undo">Undo</string>
+    <string name="redo">Redo</string>
+    <string name="swap_pages">Swap</string>
+    <string name="swap_pages_title">Swap pages</string>
+    <string name="current_page_label">Selected page</string>
+    <string name="swap_with_page_label">Swap with page (1–%1$d)</string>
+    <string name="invalid_page_number">Enter a page number between 1 and %1$d</string>
+    <string name="same_page_swap_hint">Choose a different page number</string>
+    <string name="select_page_hint">Tap a page to select it. Double-tap to add text.</string>
     <string name="done">Done</string>
     <string name="bold">Bold</string>
     <string name="cover_background">White fill</string>
-    <string name="tap_text_to_edit_hint">Tap any text on the page to edit it, or tap \"Add text\" to insert new text.</string>
+    <string name="tap_text_to_edit_hint">Tap \"Add text\" below to place text on the page. Drag any text box to move it.</string>
     <string name="type_text_hint">Type text…</string>
     <string name="save_pdf_dialog_title">Save PDF</string>
     <string name="save_as_new_file">Save as new file</string>

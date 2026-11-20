@@ -237,7 +237,7 @@
 
     <!-- PDF Editor -->
     <string name="edit_pdf">تعديل PDF</string>
-    <string name="edit_text_tab">تعديل النص</string>
+    <string name="edit_text_tab">إضافة نص</string>
     <string name="organize_pages_tab">الصفحات</string>
     <string name="save">حفظ</string>
     <string name="saving_pdf">جاري حفظ PDF…</string>
@@ -250,10 +250,18 @@
     <string name="move_left">نقل للخلف</string>
     <string name="move_right">نقل للأمام</string>
     <string name="undo">تراجع</string>
+    <string name="redo">إعادة</string>
+    <string name="swap_pages">تبديل</string>
+    <string name="swap_pages_title">تبديل الصفحات</string>
+    <string name="current_page_label">الصفحة المحددة</string>
+    <string name="swap_with_page_label">تبديل مع صفحة (1–%1$d)</string>
+    <string name="invalid_page_number">أدخل رقم صفحة بين 1 و %1$d</string>
+    <string name="same_page_swap_hint">اختر رقم صفحة مختلفاً</string>
+    <string name="select_page_hint">اضغط على صفحة لتحديدها، أو اضغط مرتين لإضافة نص.</string>
     <string name="done">تم</string>
     <string name="bold">عريض</string>
     <string name="cover_background">خلفية بيضاء</string>
-    <string name="tap_text_to_edit_hint">اضغط على أي نص في الصفحة لتعديله، أو اضغط على \"إضافة نص\" لإدراج نص جديد.</string>
+    <string name="tap_text_to_edit_hint">اضغط على \"إضافة نص\" بالأسفل لوضع نص على الصفحة، أو اسحبه لتحريكه.</string>
     <string name="type_text_hint">اكتب النص…</string>
     <string name="save_pdf_dialog_title">حفظ ملف PDF</string>
     <string name="save_as_new_file">حفظ كملف جديد</string>

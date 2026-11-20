@@ -7,14 +7,12 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.text.Layout
 import android.text.StaticLayout
+import android.text.TextDirectionHeuristics
 import android.text.TextPaint
 import uniffi.pdf_core.PageDimension
-import uniffi.pdf_core.PageTextContent
 import java.io.File
 import java.util.UUID
-import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 data class PdfEditorSession(
@@ -100,99 +98,6 @@ data class EditorPageItem(
     }
 }
 
-data class DetectedTextLine(
-    val text: String,
-    val left: Float,
-    val top: Float,
-    val right: Float,
-    val bottom: Float,
-    val estimatedFontSizePts: Float,
-)
-
-/**
- * Groups character boxes from PDFium into clean editable horizontal text segments.
- * Splits across large horizontal gaps so multi-column layouts or table cells can be edited individually.
- */
-fun detectEditableTextLines(
-    content: PageTextContent,
-    pageHeightPts: Float,
-): List<DetectedTextLine> {
-    if (content.chars.isEmpty()) return emptyList()
-
-    data class MutableLine(
-        val chars: MutableList<uniffi.pdf_core.PageTextChar>,
-        var left: Float,
-        var top: Float,
-        var right: Float,
-        var bottom: Float,
-        var sumHeight: Float,
-    ) {
-        fun centerY(): Float = (top + bottom) * 0.5f
-        fun avgHeight(): Float = (sumHeight / chars.size.coerceAtLeast(1)).coerceAtLeast(0.008f)
-    }
-
-    val lines = mutableListOf<MutableLine>()
-    for (ch in content.chars) {
-        if (ch.text == "\r" || ch.text == "\n") continue
-        val r = ch.rect
-        val chW = (r.right - r.left).coerceAtLeast(0f)
-        val chH = (r.bottom - r.top).coerceAtLeast(0f)
-        if (chH <= 0.0005f) continue
-        val cy = (r.top + r.bottom) * 0.5f
-
-        val last = lines.lastOrNull()
-        val sameLine = if (last != null) {
-            val refH = max(last.avgHeight(), chH)
-            val yClose = abs(cy - last.centerY()) <= refH * 0.65f
-            val gapX = max(0f, max(r.left - last.right, last.left - r.right))
-            val xClose = gapX <= refH * 2.6f
-            yClose && xClose
-        } else {
-            false
-        }
-
-        if (sameLine && last != null) {
-            last.chars.add(ch)
-            if (chW > 0f) {
-                last.left = min(last.left, r.left)
-                last.right = max(last.right, r.right)
-            }
-            last.top = min(last.top, r.top)
-            last.bottom = max(last.bottom, r.bottom)
-            last.sumHeight += chH
-        } else {
-            lines.add(
-                MutableLine(
-                    chars = mutableListOf(ch),
-                    left = r.left,
-                    top = r.top,
-                    right = r.right,
-                    bottom = r.bottom,
-                    sumHeight = chH
-                )
-            )
-        }
-    }
-
-    return lines.mapNotNull { line ->
-        val rawText = buildString {
-            line.chars.forEach { append(it.text) }
-        }.trim()
-        if (rawText.isEmpty()) return@mapNotNull null
-
-        val normHeight = (line.bottom - line.top).coerceAtLeast(0.01f)
-        val fontPts = (normHeight * pageHeightPts * 0.82f).coerceIn(8f, 48f)
-        DetectedTextLine(
-            text = rawText,
-            left = line.left.coerceIn(0f, 1f),
-            top = line.top.coerceIn(0f, 1f),
-            right = line.right.coerceIn(0f, 1f),
-            bottom = line.bottom.coerceIn(0f, 1f),
-            estimatedFontSizePts = fontPts,
-        )
-    }
-}
-
 /**
  * Renders an EditorTextBox to a crisp high-DPI transparent PNG so Arabic, RTL, emojis,
  * and multi-line wrapped text render identically to the live Compose editor preview.
@@ -219,6 +124,7 @@ fun renderTextBoxOverlayPng(
     val staticLayout = StaticLayout.Builder
         .obtain(box.text, 0, box.text.length, paint, widthPx)
         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setTextDirection(TextDirectionHeuristics.FIRSTSTRONG_LTR)
         .setIncludePad(false)
         .build()
 
