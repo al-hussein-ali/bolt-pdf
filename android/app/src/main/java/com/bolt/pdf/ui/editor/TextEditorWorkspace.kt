@@ -13,9 +13,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -199,26 +201,41 @@ internal fun TextEditorWorkspace(
                 .weight(1f)
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainer)
-                .pointerInput(page.id) {
-                    detectTransformGestures { _, _, zoom, _ ->
-                        if (zoom != 1f) {
-                            canvasZoom = (canvasZoom * zoom).coerceIn(1f, 3f)
-                        }
-                    }
-                }
-                .horizontalScroll(rememberScrollState(), enabled = canvasZoom > 1.02f)
-                .verticalScroll(scrollState)
-                .padding(16.dp),
-            contentAlignment = Alignment.TopCenter
         ) {
-            val maxCanvasWidthPx = (constraints.maxWidth.coerceAtLeast(1) * canvasZoom).roundToInt()
+            val hPaddingPx = with(density) { 32.dp.roundToPx() }
+            val basePageWidthPx = (constraints.maxWidth - hPaddingPx).coerceAtLeast(1)
             val aspectRatio = page.effectiveAspectRatio()
-            val pageWidthPx = maxCanvasWidthPx
+            val pageWidthPx = (basePageWidthPx * canvasZoom).roundToInt().coerceAtLeast(1)
             val pageHeightPx = (pageWidthPx / aspectRatio).roundToInt().coerceAtLeast(1)
             val pageWidthDp = with(density) { pageWidthPx.toDp() }
             val pageHeightDp = with(density) { pageHeightPx.toDp() }
             val ptsToPx = pageHeightPx.toFloat() / page.effectiveHeightPts().coerceAtLeast(1f)
+            val hScrollState = rememberScrollState()
 
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(page.id) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                val pressedCount = event.changes.count { it.pressed }
+                                if (pressedCount >= 2) {
+                                    val zoomChange = event.calculateZoom()
+                                    if (zoomChange != 1f) {
+                                        canvasZoom = (canvasZoom * zoomChange).coerceIn(1f, 3f)
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    }
+                    .horizontalScroll(hScrollState, enabled = canvasZoom > 1.02f)
+                    .verticalScroll(scrollState)
+                    .padding(16.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
             Surface(
                 shadowElevation = 4.dp,
                 color = Color.White,
@@ -423,6 +440,7 @@ internal fun TextEditorWorkspace(
                         }
                     }
                 }
+            }
             }
         }
 
