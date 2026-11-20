@@ -758,6 +758,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -785,6 +787,8 @@ internal interface UniffiLib : Library {
     ): Pointer
     fun uniffi_pdf_core_fn_method_pdfengine_add_highlight(`ptr`: Pointer,`fileHash`: RustBuffer.ByValue,`pageIndex`: Int,`startChar`: Int,`endChar`: Int,`rects`: RustBuffer.ByValue,`colorArgb`: Int,`selectedText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_pdf_core_fn_method_pdfengine_apply_pdf_edits(`ptr`: Pointer,`inputPath`: RustBuffer.ByValue,`pages`: RustBuffer.ByValue,`outputPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_pdf_core_fn_method_pdfengine_cancel_active_search(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_pdf_core_fn_method_pdfengine_close_document(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -939,6 +943,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_pdf_core_checksum_method_pdfengine_add_highlight(
     ): Short
+    fun uniffi_pdf_core_checksum_method_pdfengine_apply_pdf_edits(
+    ): Short
     fun uniffi_pdf_core_checksum_method_pdfengine_cancel_active_search(
     ): Short
     fun uniffi_pdf_core_checksum_method_pdfengine_close_document(
@@ -999,6 +1005,9 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_pdf_core_checksum_method_pdfengine_add_highlight() != 37029.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_pdf_core_checksum_method_pdfengine_apply_pdf_edits() != 30276.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_pdf_core_checksum_method_pdfengine_cancel_active_search() != 41400.toShort()) {
@@ -1468,6 +1477,8 @@ public interface PdfEngineInterface {
     
     fun `addHighlight`(`fileHash`: kotlin.String, `pageIndex`: kotlin.UInt, `startChar`: kotlin.UInt, `endChar`: kotlin.UInt, `rects`: List<NormalizedRect>, `colorArgb`: kotlin.UInt, `selectedText`: kotlin.String): HighlightRecord
     
+    fun `applyPdfEdits`(`inputPath`: kotlin.String, `pages`: List<EditPageSpec>, `outputPath`: kotlin.String)
+    
     fun `cancelActiveSearch`()
     
     fun `closeDocument`()
@@ -1610,6 +1621,18 @@ open class PdfEngine: Disposable, AutoCloseable, PdfEngineInterface {
     }
     )
     }
+    
+
+    
+    @Throws(PdfException::class)override fun `applyPdfEdits`(`inputPath`: kotlin.String, `pages`: List<EditPageSpec>, `outputPath`: kotlin.String)
+        = 
+    callWithPointer {
+    uniffiRustCallWithError(PdfException) { _status ->
+    UniffiLib.INSTANCE.uniffi_pdf_core_fn_method_pdfengine_apply_pdf_edits(
+        it, FfiConverterString.lower(`inputPath`),FfiConverterSequenceTypeEditPageSpec.lower(`pages`),FfiConverterString.lower(`outputPath`),_status)
+}
+    }
+    
     
 
     override fun `cancelActiveSearch`()
@@ -1930,6 +1953,42 @@ public object FfiConverterTypeDocumentOpenResult: FfiConverterRustBuffer<Documen
 
 
 
+data class EditPageSpec (
+    var `source`: EditPageSource, 
+    var `rotationDegrees`: kotlin.Int, 
+    var `textEdits`: List<PdfTextEditOp>
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeEditPageSpec: FfiConverterRustBuffer<EditPageSpec> {
+    override fun read(buf: ByteBuffer): EditPageSpec {
+        return EditPageSpec(
+            FfiConverterTypeEditPageSource.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterSequenceTypePdfTextEditOp.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: EditPageSpec) = (
+            FfiConverterTypeEditPageSource.allocationSize(value.`source`) +
+            FfiConverterInt.allocationSize(value.`rotationDegrees`) +
+            FfiConverterSequenceTypePdfTextEditOp.allocationSize(value.`textEdits`)
+    )
+
+    override fun write(value: EditPageSpec, buf: ByteBuffer) {
+            FfiConverterTypeEditPageSource.write(value.`source`, buf)
+            FfiConverterInt.write(value.`rotationDegrees`, buf)
+            FfiConverterSequenceTypePdfTextEditOp.write(value.`textEdits`, buf)
+    }
+}
+
+
+
 data class HighlightRecord (
     var `id`: kotlin.Long, 
     var `fileHash`: kotlin.String, 
@@ -2142,6 +2201,86 @@ public object FfiConverterTypePageTextContent: FfiConverterRustBuffer<PageTextCo
 
 
 
+data class PdfTextEditOp (
+    var `coverLeft`: kotlin.Float?, 
+    var `coverTop`: kotlin.Float?, 
+    var `coverRight`: kotlin.Float?, 
+    var `coverBottom`: kotlin.Float?, 
+    var `coverColorArgb`: kotlin.UInt, 
+    var `left`: kotlin.Float, 
+    var `top`: kotlin.Float, 
+    var `right`: kotlin.Float, 
+    var `bottom`: kotlin.Float, 
+    var `text`: kotlin.String, 
+    var `fontSizePts`: kotlin.Float, 
+    var `colorArgb`: kotlin.UInt, 
+    var `isBold`: kotlin.Boolean, 
+    var `overlayImagePath`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePdfTextEditOp: FfiConverterRustBuffer<PdfTextEditOp> {
+    override fun read(buf: ByteBuffer): PdfTextEditOp {
+        return PdfTextEditOp(
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterOptionalFloat.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PdfTextEditOp) = (
+            FfiConverterOptionalFloat.allocationSize(value.`coverLeft`) +
+            FfiConverterOptionalFloat.allocationSize(value.`coverTop`) +
+            FfiConverterOptionalFloat.allocationSize(value.`coverRight`) +
+            FfiConverterOptionalFloat.allocationSize(value.`coverBottom`) +
+            FfiConverterUInt.allocationSize(value.`coverColorArgb`) +
+            FfiConverterFloat.allocationSize(value.`left`) +
+            FfiConverterFloat.allocationSize(value.`top`) +
+            FfiConverterFloat.allocationSize(value.`right`) +
+            FfiConverterFloat.allocationSize(value.`bottom`) +
+            FfiConverterString.allocationSize(value.`text`) +
+            FfiConverterFloat.allocationSize(value.`fontSizePts`) +
+            FfiConverterUInt.allocationSize(value.`colorArgb`) +
+            FfiConverterBoolean.allocationSize(value.`isBold`) +
+            FfiConverterOptionalString.allocationSize(value.`overlayImagePath`)
+    )
+
+    override fun write(value: PdfTextEditOp, buf: ByteBuffer) {
+            FfiConverterOptionalFloat.write(value.`coverLeft`, buf)
+            FfiConverterOptionalFloat.write(value.`coverTop`, buf)
+            FfiConverterOptionalFloat.write(value.`coverRight`, buf)
+            FfiConverterOptionalFloat.write(value.`coverBottom`, buf)
+            FfiConverterUInt.write(value.`coverColorArgb`, buf)
+            FfiConverterFloat.write(value.`left`, buf)
+            FfiConverterFloat.write(value.`top`, buf)
+            FfiConverterFloat.write(value.`right`, buf)
+            FfiConverterFloat.write(value.`bottom`, buf)
+            FfiConverterString.write(value.`text`, buf)
+            FfiConverterFloat.write(value.`fontSizePts`, buf)
+            FfiConverterUInt.write(value.`colorArgb`, buf)
+            FfiConverterBoolean.write(value.`isBold`, buf)
+            FfiConverterOptionalString.write(value.`overlayImagePath`, buf)
+    }
+}
+
+
+
 data class ReadingProgress (
     var `fileHash`: kotlin.String, 
     var `fileUri`: kotlin.String, 
@@ -2287,6 +2426,124 @@ public object FfiConverterTypeSearchMatch: FfiConverterRustBuffer<SearchMatch> {
             FfiConverterString.write(value.`contextSnippet`, buf)
     }
 }
+
+
+
+sealed class EditPageSource {
+    
+    data class Original(
+        val `pageIndex`: kotlin.UInt) : EditPageSource() {
+        companion object
+    }
+    
+    data class Blank(
+        val `widthPts`: kotlin.Float, 
+        val `heightPts`: kotlin.Float) : EditPageSource() {
+        companion object
+    }
+    
+    data class ExternalPdf(
+        val `path`: kotlin.String, 
+        val `pageIndex`: kotlin.UInt) : EditPageSource() {
+        companion object
+    }
+    
+    data class Image(
+        val `path`: kotlin.String) : EditPageSource() {
+        companion object
+    }
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeEditPageSource : FfiConverterRustBuffer<EditPageSource>{
+    override fun read(buf: ByteBuffer): EditPageSource {
+        return when(buf.getInt()) {
+            1 -> EditPageSource.Original(
+                FfiConverterUInt.read(buf),
+                )
+            2 -> EditPageSource.Blank(
+                FfiConverterFloat.read(buf),
+                FfiConverterFloat.read(buf),
+                )
+            3 -> EditPageSource.ExternalPdf(
+                FfiConverterString.read(buf),
+                FfiConverterUInt.read(buf),
+                )
+            4 -> EditPageSource.Image(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: EditPageSource) = when(value) {
+        is EditPageSource.Original -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterUInt.allocationSize(value.`pageIndex`)
+            )
+        }
+        is EditPageSource.Blank -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterFloat.allocationSize(value.`widthPts`)
+                + FfiConverterFloat.allocationSize(value.`heightPts`)
+            )
+        }
+        is EditPageSource.ExternalPdf -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`path`)
+                + FfiConverterUInt.allocationSize(value.`pageIndex`)
+            )
+        }
+        is EditPageSource.Image -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`path`)
+            )
+        }
+    }
+
+    override fun write(value: EditPageSource, buf: ByteBuffer) {
+        when(value) {
+            is EditPageSource.Original -> {
+                buf.putInt(1)
+                FfiConverterUInt.write(value.`pageIndex`, buf)
+                Unit
+            }
+            is EditPageSource.Blank -> {
+                buf.putInt(2)
+                FfiConverterFloat.write(value.`widthPts`, buf)
+                FfiConverterFloat.write(value.`heightPts`, buf)
+                Unit
+            }
+            is EditPageSource.ExternalPdf -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`path`, buf)
+                FfiConverterUInt.write(value.`pageIndex`, buf)
+                Unit
+            }
+            is EditPageSource.Image -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`path`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
 
 
 
@@ -2472,6 +2729,38 @@ public object FfiConverterTypePdfError : FfiConverterRustBuffer<PdfException> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalFloat: FfiConverterRustBuffer<kotlin.Float?> {
+    override fun read(buf: ByteBuffer): kotlin.Float? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterFloat.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Float?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterFloat.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Float?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterFloat.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -2550,6 +2839,34 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeEditPageSpec: FfiConverterRustBuffer<List<EditPageSpec>> {
+    override fun read(buf: ByteBuffer): List<EditPageSpec> {
+        val len = buf.getInt()
+        return List<EditPageSpec>(len) {
+            FfiConverterTypeEditPageSpec.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<EditPageSpec>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeEditPageSpec.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<EditPageSpec>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeEditPageSpec.write(it, buf)
         }
     }
 }
@@ -2662,6 +2979,34 @@ public object FfiConverterSequenceTypePageTextChar: FfiConverterRustBuffer<List<
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypePageTextChar.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePdfTextEditOp: FfiConverterRustBuffer<List<PdfTextEditOp>> {
+    override fun read(buf: ByteBuffer): List<PdfTextEditOp> {
+        val len = buf.getInt()
+        return List<PdfTextEditOp>(len) {
+            FfiConverterTypePdfTextEditOp.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PdfTextEditOp>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePdfTextEditOp.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PdfTextEditOp>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePdfTextEditOp.write(it, buf)
         }
     }
 }

@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,9 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.ui.markdown.MarkdownBlockView
-import com.velocity.pdf.ui.markdown.MdDirectionMode
-import com.velocity.pdf.ui.markdown.parseMarkdownBlocks
+import com.bolt.pdf.ui.markdown.MarkdownBlockView
+import com.bolt.pdf.ui.markdown.MdDirectionMode
+import com.bolt.pdf.ui.markdown.parseMarkdownBlocks
 
 data class MarkdownDocumentState(
     val displayName: String,

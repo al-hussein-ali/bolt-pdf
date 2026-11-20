@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui.home
+package com.bolt.pdf.ui.home
 
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -59,8 +59,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.DevicePdfItem
-import com.velocity.pdf.ui.LocalAppStrings
+import com.bolt.pdf.DevicePdfItem
+import com.bolt.pdf.ui.LocalAppStrings
 import uniffi.pdf_core.ReadingProgress
 import java.text.DateFormat
 import java.util.Date
@@ -126,6 +126,7 @@ internal fun RecentFileCard(
     onToggleFavorite: () -> Unit,
     onRename: () -> Unit,
     onShare: () -> Unit,
+    onEdit: () -> Unit,
     onMerge: () -> Unit,
     onSplit: () -> Unit,
     onDelete: () -> Unit,
@@ -241,6 +242,11 @@ internal fun RecentFileCard(
                             onClick = { menuExpanded = false; onMerge() }
                         )
                         DropdownMenuItem(
+                            text = { Text(strings.editPdf) },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = { menuExpanded = false; onEdit() }
+                        )
+                        DropdownMenuItem(
                             text = { Text(strings.splitPdf) },
                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.CallSplit, contentDescription = null) },
                             onClick = { menuExpanded = false; onSplit() }
@@ -285,6 +291,7 @@ internal fun DevicePdfCard(
     onLongClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onShare: () -> Unit,
+    onEdit: () -> Unit,
     onMerge: () -> Unit,
     onSplit: () -> Unit,
     onUploadToDrive: (() -> Unit)? = null,
@@ -386,6 +393,11 @@ internal fun DevicePdfCard(
                             text = { Text(strings.mergeWith) },
                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.MergeType, contentDescription = null) },
                             onClick = { menuExpanded = false; onMerge() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(strings.editPdf) },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            onClick = { menuExpanded = false; onEdit() }
                         )
                         DropdownMenuItem(
                             text = { Text(strings.splitPdf) },

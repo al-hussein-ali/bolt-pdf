@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui.home
+package com.bolt.pdf.ui.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -39,9 +39,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.ConflictResolutionChoice
-import com.velocity.pdf.DriveSyncConflict
-import com.velocity.pdf.ui.LocalAppStrings
+import com.bolt.pdf.ConflictResolutionChoice
+import com.bolt.pdf.DriveSyncConflict
+import com.bolt.pdf.ui.LocalAppStrings
 
 @Composable
 internal fun OpeningDocumentOverlay(label: String) {

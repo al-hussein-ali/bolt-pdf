@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import android.app.Activity
 import android.content.ClipData
@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -72,6 +73,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FindInPage
 import androidx.compose.material.icons.filled.FitScreen
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -116,9 +118,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -145,10 +149,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.velocity.pdf.OrientationMode
-import com.velocity.pdf.PageLayoutMode
-import com.velocity.pdf.PdfViewModel
-import com.velocity.pdf.ReaderUiState
+import com.bolt.pdf.OrientationMode
+import com.bolt.pdf.PageLayoutMode
+import com.bolt.pdf.PdfViewModel
+import com.bolt.pdf.ReaderUiState
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
@@ -194,6 +198,8 @@ private data class ZoomTileOverlay(
     val visibleYPx: Int,
     val tileWidthPx: Int,
     val tileHeightPx: Int,
+    val fullScaledWidthPx: Int,
+    val fullScaledHeightPx: Int,
     val scaleAtRender: Float,
     val bitmap: Bitmap,
 )
@@ -206,6 +212,7 @@ private data class TileTriggerSnapshot(
     val firstVisibleOffset: Int,
     val renderGen: Long,
     val fitFullWidth: Boolean,
+    val topPaddingPx: Int,
 )
 
 private data class ActiveTextSelection(
@@ -228,6 +235,7 @@ fun ReaderScreen(
     snackbarHostState: SnackbarHostState,
     viewModel: PdfViewModel,
     onBack: () -> Unit,
+    onEditPdf: (currentPageIndex: Int) -> Unit,
 ) {
     val progress = state.progress
     val favoriteHashes by viewModel.favoriteHashes.collectAsState()
@@ -340,9 +348,12 @@ fun ReaderScreen(
     var pendingSelStartNorm by remember(progress.fileHash) { mutableStateOf<Pair<Float, Float>?>(null) }
     var pendingSelEndNorm by remember(progress.fileHash) { mutableStateOf<Pair<Float, Float>?>(null) }
     var dragAnchorRange by remember(progress.fileHash) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var isDraggingSelectionHandle by remember(progress.fileHash) { mutableStateOf(false) }
+    var isDraggingNewSelection by remember(progress.fileHash) { mutableStateOf(false) }
 
-    val latestSelection by rememberUpdatedState(activeSelection)
-    val latestSelectionMode by rememberUpdatedState(isSelectionMode)
+    val blockScrollForNewDragSelection = (isSelectionMode && activeSelection == null) || isDraggingNewSelection
+    val latestDraggingHandle by rememberUpdatedState(isDraggingSelectionHandle)
+    val latestBlockScrollForNewDragSelection by rememberUpdatedState(blockScrollForNewDragSelection)
 
     val matchesByPage = remember(state.searchMatches) {
         state.searchMatches.groupBy { it.pageIndex.toInt() }
@@ -405,9 +416,14 @@ fun ReaderScreen(
             val pageWidthDp = with(density) { pageWidthPx.toDp() }
             val pageLeftOffsetPx = ((viewportWidthPx - pageWidthPx) / 2f).coerceAtLeast(0f)
             val pageSpacingDp = 1.5.dp
+            val statusBarTopDp = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            val topContentPadding by animateDpAsState(
+                targetValue = if (isBarsVisible) statusBarTopDp + 48.dp + pageSpacingDp else pageSpacingDp,
+                label = "topContentPadding"
+            )
 
-            // Clear any stale zoom tile immediately when dark mode or manual rotation changes
-            LaunchedEffect(progress.darkModeEnabled, progress.manualRotation) {
+            // Clear any stale zoom tile immediately when visual geometry, dark mode, or rotation changes
+            LaunchedEffect(progress.darkModeEnabled, progress.manualRotation, pageWidthPx, state.pageLayoutMode) {
                 activeZoomTiles = emptyMap()
             }
 
@@ -504,7 +520,8 @@ fun ReaderScreen(
                             lazyListState.firstVisibleItemScrollOffset
                         },
                         renderGen = state.renderGeneration,
-                        fitFullWidth = fitFullWidthOnTablet
+                        fitFullWidth = fitFullWidthOnTablet,
+                        topPaddingPx = with(density) { topContentPadding.roundToPx() }
                     )
                 }
                     .debounce(120L)
@@ -533,7 +550,9 @@ fun ReaderScreen(
                             val basePageW = dim.widthPts * fitRatio
                             val basePageH = dim.heightPts * fitRatio
                             val leftOffset = ((viewportWidthPx - basePageW) / 2f).coerceAtLeast(0f)
-                            val topOffset = ((viewportHeightPx - basePageH) / 2f).coerceAtLeast(0f)
+                            val bottomPadPx = with(density) { pageSpacingDp.toPx() }
+                            val contentH = (viewportHeightPx - snap.topPaddingPx - bottomPadPx).coerceAtLeast(1f)
+                            val topOffset = snap.topPaddingPx + ((contentH - basePageH) / 2f).coerceAtLeast(0f)
                             targets += VisibleTarget(
                                 pageIdx = pageIdx,
                                 pageScreenTop = topOffset * snap.zoomScale + snap.panY,
@@ -542,13 +561,15 @@ fun ReaderScreen(
                                 leftOffset = leftOffset
                             )
                         } else {
+                            val beforePaddingPx = lazyListState.layoutInfo.beforeContentPadding
                             for (item in lazyListState.layoutInfo.visibleItemsInfo) {
                                 val dim = state.dimensions.getOrNull(item.index) ?: continue
                                 val basePageW = pageWidthPx.toFloat()
                                 val basePageH = basePageW / dim.aspectRatio.coerceAtLeast(0.1f)
+                                val itemTopInListPx = (item.offset + beforePaddingPx).toFloat()
                                 targets += VisibleTarget(
                                     pageIdx = item.index,
-                                    pageScreenTop = item.offset.toFloat() * snap.zoomScale + snap.panY,
+                                    pageScreenTop = itemTopInListPx * snap.zoomScale + snap.panY,
                                     basePageW = basePageW,
                                     basePageH = basePageH,
                                     leftOffset = pageLeftOffsetPx
@@ -593,6 +614,8 @@ fun ReaderScreen(
                                     visibleYPx = visY,
                                     tileWidthPx = bmp.width,
                                     tileHeightPx = bmp.height,
+                                    fullScaledWidthPx = fullW,
+                                    fullScaledHeightPx = fullH,
                                     scaleAtRender = snap.zoomScale,
                                     bitmap = bmp
                                 )
@@ -620,13 +643,14 @@ fun ReaderScreen(
                                 if (pressedCount >= 2) {
                                     isPinching = true
                                 }
-                                if (!isPinching && !isPanning && zoomScale > 1.02f && latestSelection == null && !latestSelectionMode) {
+                                val anyConsumed = event.changes.any { it.isConsumed }
+                                if (!isPinching && !isPanning && !anyConsumed && zoomScale > 1.02f && !latestDraggingHandle && !latestBlockScrollForNewDragSelection) {
                                     panAccum += event.calculatePan()
                                     if (panAccum.getDistance() > touchSlop) {
                                         isPanning = true
                                     }
                                 }
-                                val shouldHandlePan = isPinching || (isPanning && zoomScale > 1.02f && latestSelection == null && !latestSelectionMode)
+                                val shouldHandlePan = isPinching || (isPanning && !anyConsumed && zoomScale > 1.02f && !latestDraggingHandle && !latestBlockScrollForNewDragSelection)
                                 if (shouldHandlePan) {
                                     val zoomChange = event.calculateZoom()
                                     val panChange = event.calculatePan()
@@ -775,16 +799,10 @@ fun ReaderScreen(
                     }
                 }
 
-                val statusBarTopDp = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-                val topContentPadding by animateDpAsState(
-                    targetValue = if (isBarsVisible) statusBarTopDp + 48.dp + pageSpacingDp else pageSpacingDp,
-                    label = "topContentPadding"
-                )
-
                 if (state.pageLayoutMode == PageLayoutMode.VERTICAL_SCROLL) {
                     LazyColumn(
                         state = lazyListState,
-                        userScrollEnabled = zoomScale <= 1.02f && activeSelection == null && !isSelectionMode,
+                        userScrollEnabled = zoomScale <= 1.02f && !isDraggingSelectionHandle && !blockScrollForNewDragSelection,
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .fillMaxSize()
@@ -822,7 +840,7 @@ fun ReaderScreen(
                                 highlights = highlightsByPage[index].orEmpty(),
                                 selectionRects = if (activeSelection?.pageIndex == index) activeSelection?.rects.orEmpty() else emptyList(),
                                 selectionHandles = if (activeSelection?.pageIndex == index) activeSelection?.handles else null,
-                                isSelectionMode = isSelectionMode,
+                                isDirectDragSelection = blockScrollForNewDragSelection,
                                 zoomScale = zoomScale,
                                 zoomTile = activeZoomTiles[index],
                                 viewModel = viewModel,
@@ -861,7 +879,9 @@ fun ReaderScreen(
                                 onStartSelection = { normX, normY -> startSelectionAt(index, normX, normY) },
                                 onDragSelection = { normX, normY -> dragSelectionTo(index, normX, normY) },
                                 onDragStartHandle = { normX, normY -> dragStartHandleTo(index, normX, normY) },
-                                onDragEndHandle = { normX, normY -> dragEndHandleTo(index, normX, normY) }
+                                onDragEndHandle = { normX, normY -> dragEndHandleTo(index, normX, normY) },
+                                onHandleDragStateChanged = { dragging -> isDraggingSelectionHandle = dragging },
+                                onNewDragSelectionStateChanged = { dragging -> isDraggingNewSelection = dragging }
                             )
                         }
                     }
@@ -887,7 +907,7 @@ fun ReaderScreen(
                     HorizontalPager(
                         state = pagerState,
                         contentPadding = PaddingValues(top = topContentPadding, bottom = pageSpacingDp),
-                        userScrollEnabled = zoomScale <= 1.02f && activeSelection == null && !isSelectionMode,
+                        userScrollEnabled = zoomScale <= 1.02f && !isDraggingSelectionHandle && !blockScrollForNewDragSelection,
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
@@ -926,7 +946,7 @@ fun ReaderScreen(
                                 highlights = highlightsByPage[index].orEmpty(),
                                 selectionRects = if (activeSelection?.pageIndex == index) activeSelection?.rects.orEmpty() else emptyList(),
                                 selectionHandles = if (activeSelection?.pageIndex == index) activeSelection?.handles else null,
-                                isSelectionMode = isSelectionMode,
+                                isDirectDragSelection = blockScrollForNewDragSelection,
                                 zoomScale = zoomScale,
                                 zoomTile = activeZoomTiles[index],
                                 viewModel = viewModel,
@@ -965,7 +985,9 @@ fun ReaderScreen(
                                 onStartSelection = { normX, normY -> startSelectionAt(index, normX, normY) },
                                 onDragSelection = { normX, normY -> dragSelectionTo(index, normX, normY) },
                                 onDragStartHandle = { normX, normY -> dragStartHandleTo(index, normX, normY) },
-                                onDragEndHandle = { normX, normY -> dragEndHandleTo(index, normX, normY) }
+                                onDragEndHandle = { normX, normY -> dragEndHandleTo(index, normX, normY) },
+                                onHandleDragStateChanged = { dragging -> isDraggingSelectionHandle = dragging },
+                                onNewDragSelectionStateChanged = { dragging -> isDraggingNewSelection = dragging }
                             )
                         }
                     }
@@ -1116,6 +1138,16 @@ fun ReaderScreen(
                                                 overflowExpanded = false
                                                 showOrientationPrompt = false
                                                 viewModel.cycleOrientationMode()
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text(strings.editPdf) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Edit, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                overflowExpanded = false
+                                                onEditPdf(currentPageIndex)
                                             }
                                         )
                                         DropdownMenuItem(
@@ -1720,7 +1752,7 @@ private fun PdfPageItem(
     highlights: List<HighlightRecord>,
     selectionRects: List<NormalizedRect>,
     selectionHandles: SelectionHandleBounds?,
-    isSelectionMode: Boolean,
+    isDirectDragSelection: Boolean,
     zoomScale: Float,
     zoomTile: ZoomTileOverlay?,
     viewModel: PdfViewModel,
@@ -1730,6 +1762,8 @@ private fun PdfPageItem(
     onDragSelection: (normX: Float, normY: Float) -> Unit,
     onDragStartHandle: (normX: Float, normY: Float) -> Boolean,
     onDragEndHandle: (normX: Float, normY: Float) -> Boolean,
+    onHandleDragStateChanged: (Boolean) -> Unit,
+    onNewDragSelectionStateChanged: (Boolean) -> Unit,
 ) {
     var baseBitmap by remember(pageIndex, pageWidthPx, pageHeightPx, renderGeneration, rotation, darkMode) {
         mutableStateOf<Bitmap?>(null)
@@ -1762,6 +1796,7 @@ private fun PdfPageItem(
         modifier = Modifier
             .width(pageWidthDp)
             .height(pageHeightDp)
+            .clipToBounds()
             .background(if (darkMode) Color(0xFF141414) else Color.White)
             .pointerInput(pageIndex, pageWidthPx, pageHeightPx) {
                 detectTapGestures(
@@ -1775,14 +1810,17 @@ private fun PdfPageItem(
                     }
                 )
             }
-            .pointerInput(pageIndex, pageWidthPx, pageHeightPx, isSelectionMode) {
-                if (isSelectionMode) {
+            .pointerInput(pageIndex, pageWidthPx, pageHeightPx, isDirectDragSelection) {
+                if (isDirectDragSelection) {
                     detectDragGestures(
                         onDragStart = { offset ->
+                            onNewDragSelectionStateChanged(true)
                             val nx = (offset.x / size.width.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                             val ny = (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                             onStartSelection(nx, ny)
                         },
+                        onDragEnd = { onNewDragSelectionStateChanged(false) },
+                        onDragCancel = { onNewDragSelectionStateChanged(false) },
                         onDrag = { change, _ ->
                             change.consume()
                             val nx = (change.position.x / size.width.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
@@ -1820,17 +1858,20 @@ private fun PdfPageItem(
 
         // Sharp high-DPI cropped viewport tile drawn seamlessly over base bitmap
         if (zoomTile != null && !zoomTile.bitmap.isRecycled) {
-            val offsetX = (zoomTile.visibleXPx / zoomTile.scaleAtRender).roundToInt()
-            val offsetY = (zoomTile.visibleYPx / zoomTile.scaleAtRender).roundToInt()
-            val widthDp = with(density) { (zoomTile.tileWidthPx / zoomTile.scaleAtRender).toDp() }
-            val heightDp = with(density) { (zoomTile.tileHeightPx / zoomTile.scaleAtRender).toDp() }
+            val scaleXRatio = pageWidthPx.toFloat() / zoomTile.fullScaledWidthPx.coerceAtLeast(1)
+            val scaleYRatio = pageHeightPx.toFloat() / zoomTile.fullScaledHeightPx.coerceAtLeast(1)
+            val offsetX = (zoomTile.visibleXPx * scaleXRatio).roundToInt()
+            val offsetY = (zoomTile.visibleYPx * scaleYRatio).roundToInt()
+            val widthDp = with(density) { (zoomTile.tileWidthPx * scaleXRatio).toDp() }
+            val heightDp = with(density) { (zoomTile.tileHeightPx * scaleYRatio).toDp() }
 
             Image(
                 bitmap = zoomTile.bitmap.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier
-                    .offset { IntOffset(offsetX, offsetY) }
+                    .align(AbsoluteAlignment.TopLeft)
+                    .absoluteOffset { IntOffset(offsetX, offsetY) }
                     .size(width = widthDp, height = heightDp)
             )
         }
@@ -1976,31 +2017,36 @@ private fun PdfPageItem(
                             }
 
                             down.consume()
-                            var draggingStart = distStart <= distEnd
-                            val anchorLineX = if (draggingStart) sx else ex
-                            val anchorLineY = if (draggingStart) syLine else eyLine
-                            val grabOffsetX = anchorLineX - down.position.x
-                            val grabOffsetY = anchorLineY - down.position.y
+                            onHandleDragStateChanged(true)
+                            try {
+                                var draggingStart = distStart <= distEnd
+                                val anchorLineX = if (draggingStart) sx else ex
+                                val anchorLineY = if (draggingStart) syLine else eyLine
+                                val grabOffsetX = anchorLineX - down.position.x
+                                val grabOffsetY = anchorLineY - down.position.y
 
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id }
-                                    ?: event.changes.firstOrNull()
-                                    ?: break
-                                if (!change.pressed) {
-                                    change.consume()
-                                    break
-                                }
-                                if (change.positionChanged()) {
-                                    change.consume()
-                                    val nx = ((change.position.x + grabOffsetX) / w).coerceIn(0f, 1f)
-                                    val ny = ((change.position.y + grabOffsetY) / h).coerceIn(0f, 1f)
-                                    draggingStart = if (draggingStart) {
-                                        onDragStartHandle(nx, ny)
-                                    } else {
-                                        onDragEndHandle(nx, ny)
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                        ?: event.changes.firstOrNull()
+                                        ?: break
+                                    if (!change.pressed) {
+                                        change.consume()
+                                        break
+                                    }
+                                    if (change.positionChanged()) {
+                                        change.consume()
+                                        val nx = ((change.position.x + grabOffsetX) / w).coerceIn(0f, 1f)
+                                        val ny = ((change.position.y + grabOffsetY) / h).coerceIn(0f, 1f)
+                                        draggingStart = if (draggingStart) {
+                                            onDragStartHandle(nx, ny)
+                                        } else {
+                                            onDragEndHandle(nx, ny)
+                                        }
                                     }
                                 }
+                            } finally {
+                                onHandleDragStateChanged(false)
                             }
                         }
                     }

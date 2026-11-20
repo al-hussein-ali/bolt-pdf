@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme

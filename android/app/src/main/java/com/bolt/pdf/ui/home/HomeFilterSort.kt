@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui.home
+package com.bolt.pdf.ui.home
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
@@ -22,12 +22,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.DevicePdfItem
-import com.velocity.pdf.HomeDateFilter
-import com.velocity.pdf.HomeProgressFilter
-import com.velocity.pdf.HomeSizeFilter
-import com.velocity.pdf.HomeSortOption
-import com.velocity.pdf.ui.AppStrings
+import com.bolt.pdf.DevicePdfItem
+import com.bolt.pdf.HomeDateFilter
+import com.bolt.pdf.HomeProgressFilter
+import com.bolt.pdf.HomeSizeFilter
+import com.bolt.pdf.HomeSortOption
+import com.bolt.pdf.ui.AppStrings
 import uniffi.pdf_core.ReadingProgress
 import java.util.Calendar
 import java.util.Locale

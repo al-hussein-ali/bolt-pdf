@@ -13,9 +13,35 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+val detectedLocales = buildList {
+    add("en")
+    file("src/main/res").listFiles()
+        ?.filter { it.isDirectory && it.name.startsWith("values-") && file("${it.path}/strings.xml").exists() }
+        ?.mapNotNull { dir ->
+            val qualifier = dir.name.removePrefix("values-")
+            when {
+                qualifier.startsWith("b+") -> qualifier.removePrefix("b+").replace("+", "-")
+                qualifier.matches(Regex("^[a-z]{2,3}(-r[A-Z]{2})?$")) -> qualifier.replace("-r", "-")
+                else -> null
+            }
+        }
+        ?.distinct()
+        ?.sorted()
+        ?.forEach { if (it != "en") add(it) }
+}
+val supportedLocalesLiteral = detectedLocales.joinToString(
+    separator = ", ",
+    prefix = "new String[]{",
+    postfix = "}"
+) { "\"$it\"" }
+
 android {
-    namespace = "com.velocity.pdf"
+    namespace = "com.bolt.pdf"
     compileSdk = 36
+
+    androidResources {
+        generateLocaleConfig = true
+    }
 
     defaultConfig {
         applicationId = "com.bolt.pdf"
@@ -23,6 +49,8 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+
+        buildConfigField("String[]", "SUPPORTED_LOCALES", supportedLocalesLiteral)
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -68,6 +96,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

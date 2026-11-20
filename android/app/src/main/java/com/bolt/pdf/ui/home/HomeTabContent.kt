@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui.home
+package com.bolt.pdf.ui.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -37,8 +37,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.DevicePdfItem
-import com.velocity.pdf.ui.LocalAppStrings
+import com.bolt.pdf.DevicePdfItem
+import com.bolt.pdf.ui.LocalAppStrings
 import uniffi.pdf_core.ReadingProgress
 
 @Composable
@@ -57,6 +57,7 @@ internal fun RecentTabContent(
     onToggleFavorite: (ReadingProgress) -> Unit,
     onRename: (ReadingProgress) -> Unit,
     onShare: (ReadingProgress) -> Unit,
+    onEdit: (ReadingProgress) -> Unit,
     onMerge: (ReadingProgress) -> Unit,
     onSplit: (ReadingProgress) -> Unit,
     onDelete: (ReadingProgress) -> Unit,
@@ -106,6 +107,7 @@ internal fun RecentTabContent(
                         onToggleFavorite = { onToggleFavorite(item) },
                         onRename = { onRename(item) },
                         onShare = { onShare(item) },
+                        onEdit = { onEdit(item) },
                         onMerge = { onMerge(item) },
                         onSplit = { onSplit(item) },
                         onDelete = { onDelete(item) }
@@ -133,10 +135,12 @@ internal fun FavoritesTabContent(
     onToggleFavoriteDevice: (DevicePdfItem) -> Unit,
     onRenameRecent: (ReadingProgress) -> Unit,
     onShareRecent: (ReadingProgress) -> Unit,
+    onEditRecent: (ReadingProgress) -> Unit,
     onMergeRecent: (ReadingProgress) -> Unit,
     onSplitRecent: (ReadingProgress) -> Unit,
     onDeleteRecent: (ReadingProgress) -> Unit,
     onShareDevice: (DevicePdfItem) -> Unit,
+    onEditDevice: (DevicePdfItem) -> Unit,
     onMergeDevice: (DevicePdfItem) -> Unit,
     onSplitDevice: (DevicePdfItem) -> Unit,
 ) {
@@ -176,6 +180,7 @@ internal fun FavoritesTabContent(
                 onToggleFavorite = { onToggleFavoriteRecent(item) },
                 onRename = { onRenameRecent(item) },
                 onShare = { onShareRecent(item) },
+                onEdit = { onEditRecent(item) },
                 onMerge = { onMergeRecent(item) },
                 onSplit = { onSplitRecent(item) },
                 onDelete = { onDeleteRecent(item) }
@@ -191,6 +196,7 @@ internal fun FavoritesTabContent(
                 onLongClick = { onDeviceLongClick(item) },
                 onToggleFavorite = { onToggleFavoriteDevice(item) },
                 onShare = { onShareDevice(item) },
+                onEdit = { onEditDevice(item) },
                 onMerge = { onMergeDevice(item) },
                 onSplit = { onSplitDevice(item) }
             )
@@ -215,6 +221,7 @@ internal fun DevicePdfsTabContent(
     onCardLongClick: (DevicePdfItem) -> Unit,
     onToggleFavorite: (DevicePdfItem) -> Unit,
     onShare: (DevicePdfItem) -> Unit,
+    onEdit: (DevicePdfItem) -> Unit,
     onMerge: (DevicePdfItem) -> Unit,
     onSplit: (DevicePdfItem) -> Unit,
     onUploadToDrive: (DevicePdfItem) -> Unit,
@@ -336,6 +343,7 @@ internal fun DevicePdfsTabContent(
                         onLongClick = { onCardLongClick(item) },
                         onToggleFavorite = { onToggleFavorite(item) },
                         onShare = { onShare(item) },
+                        onEdit = { onEdit(item) },
                         onMerge = { onMerge(item) },
                         onSplit = { onSplit(item) },
                         onUploadToDrive = if (driveAccountEmail != null && !isSyncingDrive) {

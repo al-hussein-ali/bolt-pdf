@@ -1,10 +1,11 @@
-package com.velocity.pdf.ui.markdown
+package com.bolt.pdf.ui.markdown
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -15,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,10 +33,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -44,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -352,6 +359,12 @@ private fun TaskItemBlockView(
     }
 }
 
+private class TableGridMetrics {
+    var colWidths: IntArray = IntArray(0)
+    var rowHeights: IntArray = IntArray(0)
+    var dividerPx: Int = 1
+}
+
 @Composable
 private fun MarkdownTableView(
     table: MdBlock.Table,
@@ -360,89 +373,176 @@ private fun MarkdownTableView(
     codeColor: Color,
     linkColor: Color,
 ) {
-    val columnCount = table.headers.size.coerceAtLeast(1)
+    val allRows = remember(table) { listOf(table.headers) + table.rows }
+    val rowCount = allRows.size
+    val columnCount = remember(table) {
+        maxOf(
+            table.headers.size,
+            table.rows.maxOfOrNull { it.size } ?: 0,
+            1
+        )
+    }
     val borderColor = MaterialTheme.colorScheme.outlineVariant
     val headerBg = MaterialTheme.colorScheme.surfaceContainerHigh
     val evenRowBg = MaterialTheme.colorScheme.surfaceContainerLowest
     val oddRowBg = MaterialTheme.colorScheme.surfaceContainerLow
+    val isRtl = textDir == TextDirection.Rtl
+    val density = LocalDensity.current
+    val metrics = remember(table) { TableGridMetrics() }
 
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        border = BorderStroke(1.dp, borderColor),
-        color = evenRowBg,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-            TableRowView(
-                cells = table.headers,
-                alignments = table.alignments,
-                columnCount = columnCount,
-                background = headerBg,
-                borderColor = borderColor,
-                textDir = textDir,
-                isHeader = true,
-                codeBg = codeBg,
-                codeColor = codeColor,
-                linkColor = linkColor
-            )
-            HorizontalDivider(color = borderColor, thickness = 1.dp)
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val borderPx = with(density) { 1.dp.roundToPx().coerceAtLeast(1) }
+        val minTableWidthPx = (constraints.maxWidth - borderPx * 2).coerceAtLeast(0)
+        val minColWidthPx = with(density) { 64.dp.roundToPx() }
+        val maxColWidthPx = with(density) { 260.dp.roundToPx() }
 
-            table.rows.forEachIndexed { rowIdx, row ->
-                TableRowView(
-                    cells = row,
-                    alignments = table.alignments,
-                    columnCount = columnCount,
-                    background = if (rowIdx % 2 == 0) evenRowBg else oddRowBg,
-                    borderColor = borderColor,
-                    textDir = textDir,
-                    isHeader = false,
-                    codeBg = codeBg,
-                    codeColor = codeColor,
-                    linkColor = linkColor
-                )
-                if (rowIdx < table.rows.lastIndex) {
-                    HorizontalDivider(color = borderColor, thickness = 1.dp)
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, borderColor),
+            color = evenRowBg,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                Layout(
+                    content = {
+                        for (r in 0 until rowCount) {
+                            val rowCells = allRows[r]
+                            val isHeader = r == 0
+                            for (c in 0 until columnCount) {
+                                TableCellView(
+                                    text = rowCells.getOrElse(c) { "" },
+                                    align = table.alignments.getOrElse(c) { TableAlign.DEFAULT },
+                                    textDir = textDir,
+                                    isHeader = isHeader,
+                                    codeBg = codeBg,
+                                    codeColor = codeColor,
+                                    linkColor = linkColor
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.drawBehind {
+                        val colWidths = metrics.colWidths
+                        val rowHeights = metrics.rowHeights
+                        val div = metrics.dividerPx.toFloat()
+                        if (colWidths.isEmpty() || rowHeights.isEmpty()) return@drawBehind
+
+                        // Draw row backgrounds and horizontal dividers
+                        var y = 0f
+                        for (r in rowHeights.indices) {
+                            val h = rowHeights[r].toFloat()
+                            val bg = when {
+                                r == 0 -> headerBg
+                                (r - 1) % 2 == 0 -> evenRowBg
+                                else -> oddRowBg
+                            }
+                            drawRect(
+                                color = bg,
+                                topLeft = Offset(0f, y),
+                                size = Size(size.width, h)
+                            )
+                            y += h
+                            if (r < rowHeights.lastIndex) {
+                                drawRect(
+                                    color = borderColor,
+                                    topLeft = Offset(0f, y),
+                                    size = Size(size.width, div)
+                                )
+                                y += div
+                            }
+                        }
+
+                        // Draw vertical column dividers
+                        var x = 0f
+                        for (c in 0 until colWidths.lastIndex) {
+                            val visualCol = if (isRtl) colWidths.lastIndex - c else c
+                            x += colWidths[visualCol].toFloat()
+                            drawRect(
+                                color = borderColor,
+                                topLeft = Offset(x, 0f),
+                                size = Size(div, size.height)
+                            )
+                            x += div
+                        }
+                    }
+                ) { measurables, _ ->
+                    // 1. Measure natural width of each column across header + all rows
+                    val colWidths = IntArray(columnCount) { minColWidthPx }
+                    for (c in 0 until columnCount) {
+                        var maxW = minColWidthPx
+                        for (r in 0 until rowCount) {
+                            val intrinsic = measurables[r * columnCount + c]
+                                .maxIntrinsicWidth(Constraints.Infinity)
+                            if (intrinsic > maxW) {
+                                maxW = intrinsic
+                            }
+                        }
+                        colWidths[c] = maxW.coerceIn(minColWidthPx, maxColWidthPx)
+                    }
+
+                    // 2. If table is narrower than available viewport, expand columns proportionally
+                    val dividersWidth = (columnCount - 1) * borderPx
+                    val naturalColumnsSum = colWidths.sum()
+                    val naturalTotal = naturalColumnsSum + dividersWidth
+                    if (naturalTotal < minTableWidthPx && naturalColumnsSum > 0) {
+                        val extra = minTableWidthPx - naturalTotal
+                        var distributed = 0
+                        for (c in 0 until columnCount) {
+                            val add = if (c == columnCount - 1) {
+                                extra - distributed
+                            } else {
+                                ((extra.toLong() * colWidths[c]) / naturalColumnsSum).toInt()
+                            }
+                            colWidths[c] += add
+                            distributed += add
+                        }
+                    }
+
+                    // 3. Measure every cell with its exact column width and compute uniform row heights
+                    val placeables = ArrayList<androidx.compose.ui.layout.Placeable>(measurables.size)
+                    val rowHeights = IntArray(rowCount)
+                    for (r in 0 until rowCount) {
+                        var maxH = 0
+                        for (c in 0 until columnCount) {
+                            val placeable = measurables[r * columnCount + c].measure(
+                                Constraints(
+                                    minWidth = colWidths[c],
+                                    maxWidth = colWidths[c],
+                                    minHeight = 0,
+                                    maxHeight = Constraints.Infinity
+                                )
+                            )
+                            placeables.add(placeable)
+                            if (placeable.height > maxH) {
+                                maxH = placeable.height
+                            }
+                        }
+                        rowHeights[r] = maxH.coerceAtLeast(1)
+                    }
+
+                    val totalWidth = colWidths.sum() + dividersWidth
+                    val totalHeight = rowHeights.sum() + (rowCount - 1) * borderPx
+
+                    metrics.colWidths = colWidths
+                    metrics.rowHeights = rowHeights
+                    metrics.dividerPx = borderPx
+
+                    layout(totalWidth, totalHeight) {
+                        var y = 0
+                        for (r in 0 until rowCount) {
+                            val rowH = rowHeights[r]
+                            var x = 0
+                            for (visualIdx in 0 until columnCount) {
+                                val c = if (isRtl) columnCount - 1 - visualIdx else visualIdx
+                                val placeable = placeables[r * columnCount + c]
+                                val cellY = y + (rowH - placeable.height) / 2
+                                placeable.place(x, cellY)
+                                x += colWidths[c] + borderPx
+                            }
+                            y += rowH + borderPx
+                        }
+                    }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TableRowView(
-    cells: List<String>,
-    alignments: List<TableAlign>,
-    columnCount: Int,
-    background: Color,
-    borderColor: Color,
-    textDir: TextDirection,
-    isHeader: Boolean,
-    codeBg: Color,
-    codeColor: Color,
-    linkColor: Color,
-) {
-    Row(
-        modifier = Modifier
-            .height(IntrinsicSize.Min)
-            .background(background)
-    ) {
-        for (col in 0 until columnCount) {
-            TableCellView(
-                text = cells.getOrElse(col) { "" },
-                align = alignments.getOrElse(col) { TableAlign.DEFAULT },
-                textDir = textDir,
-                isHeader = isHeader,
-                codeBg = codeBg,
-                codeColor = codeColor,
-                linkColor = linkColor
-            )
-            if (col < columnCount - 1) {
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .background(borderColor)
-                )
             }
         }
     }
@@ -471,9 +571,7 @@ private fun TableCellView(
     val cellTextDir = if (cellDir == LayoutDirection.Rtl) TextDirection.Rtl else TextDirection.Ltr
 
     Box(
-        modifier = Modifier
-            .widthIn(min = 96.dp, max = 260.dp)
-            .padding(horizontal = 12.dp, vertical = 9.dp),
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
         contentAlignment = when (align) {
             TableAlign.CENTER -> Alignment.Center
             TableAlign.LEFT -> Alignment.CenterStart

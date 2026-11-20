@@ -8,7 +8,7 @@
 -dontwarn com.sun.jna.**
 
 # Keep JNI zero-copy entrypoints
--keep class com.velocity.pdf.NativeZeroCopy {
+-keep class com.bolt.pdf.NativeZeroCopy {
     native <methods>;
     public static <methods>;
 }

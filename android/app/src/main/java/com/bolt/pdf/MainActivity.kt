@@ -1,4 +1,4 @@
-package com.velocity.pdf
+package com.bolt.pdf
 
 import android.content.ClipData
 import android.content.Intent
@@ -23,26 +23,29 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.velocity.pdf.ui.AppLanguage
-import com.velocity.pdf.ui.HomeScreen
-import com.velocity.pdf.ui.ImageToPdfEntry
-import com.velocity.pdf.ui.ImagesToPdfScreen
-import com.velocity.pdf.ui.LocalAppStrings
-import com.velocity.pdf.ui.MarkdownReaderScreen
-import com.velocity.pdf.ui.MergePdfEntry
-import com.velocity.pdf.ui.MergePdfsScreen
-import com.velocity.pdf.ui.ReaderScreen
-import com.velocity.pdf.ui.SettingsScreen
-import com.velocity.pdf.ui.SplitPdfDialog
-import com.velocity.pdf.ui.SplitTarget
-import com.velocity.pdf.ui.VelocityPdfTheme
-import com.velocity.pdf.ui.stringsFor
+import com.bolt.pdf.ui.HomeScreen
+import com.bolt.pdf.ui.ImageToPdfEntry
+import com.bolt.pdf.ui.ImagesToPdfScreen
+import com.bolt.pdf.ui.LocalAppStrings
+import com.bolt.pdf.ui.MarkdownReaderScreen
+import com.bolt.pdf.ui.MergePdfEntry
+import com.bolt.pdf.ui.MergePdfsScreen
+import com.bolt.pdf.ui.PdfEditorScreen
+import com.bolt.pdf.ui.ReaderScreen
+import com.bolt.pdf.ui.SettingsScreen
+import com.bolt.pdf.ui.SplitPdfDialog
+import com.bolt.pdf.ui.SplitTarget
+import com.bolt.pdf.ui.VelocityPdfTheme
+import com.bolt.pdf.ui.appStringsFrom
+import com.bolt.pdf.ui.createLocalizedContext
+import com.bolt.pdf.ui.layoutDirectionFor
+import com.bolt.pdf.ui.resolveLocale
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
@@ -66,6 +69,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val readerState by viewModel.readerState.collectAsState()
             val markdownState by viewModel.markdownState.collectAsState()
+            val editorSession by viewModel.editorSession.collectAsState()
             val recentFiles by viewModel.recentFiles.collectAsState()
             val isLoadingRecents by viewModel.isLoadingRecents.collectAsState()
             val devicePdfs by viewModel.devicePdfs.collectAsState()
@@ -80,7 +84,7 @@ class MainActivity : ComponentActivity() {
             val isOpeningDocument by viewModel.isOpeningDocument.collectAsState()
             val isToolProcessing by viewModel.isToolProcessing.collectAsState()
             val globalDarkMode by viewModel.globalDarkMode.collectAsState()
-            val appLanguage by viewModel.appLanguage.collectAsState()
+            val appLanguageTag by viewModel.appLanguageTag.collectAsState()
             val orientationMode by viewModel.orientationMode.collectAsState()
             val driveAccountEmail by viewModel.driveAccountEmail.collectAsState()
             val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
@@ -152,6 +156,7 @@ class MainActivity : ComponentActivity() {
                 val observer = LifecycleEventObserver { _, event ->
                     when (event) {
                         Lifecycle.Event.ON_RESUME -> {
+                            viewModel.syncLanguageFromSystemIfNeeded()
                             viewModel.refreshRecentFiles()
                             viewModel.refreshDevicePdfs(onlyIfNeeded = true)
                         }
@@ -166,11 +171,15 @@ class MainActivity : ComponentActivity() {
             }
 
             val darkTheme = readerState?.progress?.darkModeEnabled ?: globalDarkMode
-            val strings = stringsFor(appLanguage)
-            val layoutDirection = if (appLanguage == AppLanguage.ARABIC) {
-                LayoutDirection.Rtl
-            } else {
-                LayoutDirection.Ltr
+            val configuration = LocalConfiguration.current
+            val localizedContext = remember(appLanguageTag, configuration) {
+                createLocalizedContext(this@MainActivity, appLanguageTag)
+            }
+            val strings = remember(localizedContext) {
+                appStringsFrom(localizedContext)
+            }
+            val layoutDirection = remember(appLanguageTag, configuration) {
+                layoutDirectionFor(resolveLocale(appLanguageTag))
             }
 
             val shareUriAction: (Uri, String) -> Unit = { shareUri, fileName ->
@@ -201,9 +210,36 @@ class MainActivity : ComponentActivity() {
                 LocalLayoutDirection provides layoutDirection
             ) {
                 VelocityPdfTheme(darkTheme = darkTheme) {
+                    val activeEditor = editorSession
                     val activeReader = readerState
                     val activeMarkdown = markdownState
                     when {
+                        activeEditor != null -> {
+                            PdfEditorScreen(
+                                session = activeEditor,
+                                viewModel = viewModel,
+                                isSaving = isToolProcessing,
+                                snackbarHostState = snackbarHostState,
+                                onClose = { viewModel.closePdfEditor() },
+                                onSaveAsNewFile = { editedPages, _, outputUri ->
+                                    viewModel.saveEditedPdfAsNewFile(
+                                        session = activeEditor,
+                                        pages = editedPages,
+                                        outputUri = outputUri,
+                                        onComplete = {}
+                                    )
+                                },
+                                onReplaceCurrentFile = { editedPages, newFileName ->
+                                    viewModel.replaceEditedPdf(
+                                        session = activeEditor,
+                                        pages = editedPages,
+                                        newFileName = newFileName,
+                                        onComplete = {}
+                                    )
+                                }
+                            )
+                        }
+
                         activeReader != null -> {
                             BackHandler {
                                 viewModel.closeDocument()
@@ -214,7 +250,16 @@ class MainActivity : ComponentActivity() {
                                 isOpeningDocument = isOpeningDocument,
                                 snackbarHostState = snackbarHostState,
                                 viewModel = viewModel,
-                                onBack = { viewModel.closeDocument() }
+                                onBack = { viewModel.closeDocument() },
+                                onEditPdf = { pageIdx ->
+                                    viewModel.openPdfForEdit(
+                                        uri = Uri.parse(activeReader.progress.fileUri),
+                                        displayName = activeReader.progress.displayName,
+                                        fallbackPath = activeReader.progress.fallbackCachePath,
+                                        initialPageIndex = pageIdx,
+                                        fromReader = true
+                                    )
+                                }
                             )
                         }
 
@@ -234,11 +279,11 @@ class MainActivity : ComponentActivity() {
                             }
                             SettingsScreen(
                                 darkMode = globalDarkMode,
-                                language = appLanguage,
+                                selectedLanguageTag = appLanguageTag,
                                 driveAccountEmail = driveAccountEmail,
                                 onBack = { subScreen = HomeSubScreen.HOME },
                                 onToggleDarkMode = { enabled -> viewModel.setGlobalDarkMode(enabled) },
-                                onSelectLanguage = { lang -> viewModel.setAppLanguage(lang) },
+                                onSelectLanguage = { tag -> viewModel.setAppLanguageTag(tag) },
                                 onConnectGoogleAccount = {
                                     googleSignInLauncher.launch(viewModel.driveSyncManager.getSignInIntent())
                                 },
@@ -375,6 +420,24 @@ class MainActivity : ComponentActivity() {
                                 onShareDevicePdf = { item ->
                                     shareUriAction(item.uri, item.displayName)
                                 },
+                                onEditRecent = { item ->
+                                    viewModel.openPdfForEdit(
+                                        uri = Uri.parse(item.fileUri),
+                                        displayName = item.displayName,
+                                        fallbackPath = item.fallbackCachePath,
+                                        initialPageIndex = item.lastPageIndex.toInt(),
+                                        fromReader = false
+                                    )
+                                },
+                                onEditDevicePdf = { item ->
+                                    viewModel.openPdfForEdit(
+                                        uri = item.uri,
+                                        displayName = item.displayName,
+                                        fallbackPath = null,
+                                        initialPageIndex = 0,
+                                        fromReader = false
+                                    )
+                                },
                                 onMergeRecent = { item ->
                                     mergeEntries = listOf(
                                         MergePdfEntry(
@@ -427,7 +490,7 @@ class MainActivity : ComponentActivity() {
                                                 totalPages = count
                                             )
                                         } else {
-                                            snackbarHostState.showSnackbar(stringsFor(appLanguage).unableToReadPageCount)
+                                            snackbarHostState.showSnackbar(strings.unableToReadPageCount)
                                         }
                                     }
                                 },

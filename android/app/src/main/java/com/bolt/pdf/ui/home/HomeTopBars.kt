@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui.home
+package com.bolt.pdf.ui.home
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -57,12 +57,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.HomeDateFilter
-import com.velocity.pdf.HomeProgressFilter
-import com.velocity.pdf.HomeSizeFilter
-import com.velocity.pdf.HomeSortOption
-import com.velocity.pdf.R
-import com.velocity.pdf.ui.LocalAppStrings
+import com.bolt.pdf.HomeDateFilter
+import com.bolt.pdf.HomeProgressFilter
+import com.bolt.pdf.HomeSizeFilter
+import com.bolt.pdf.HomeSortOption
+import com.bolt.pdf.R
+import com.bolt.pdf.ui.LocalAppStrings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

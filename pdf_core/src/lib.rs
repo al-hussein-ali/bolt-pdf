@@ -4,6 +4,7 @@ mod db;
 mod renderer;
 mod search;
 mod tools;
+pub use crate::tools::{EditPageSource, EditPageSpec, PdfTextEditOp};
 
 use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -555,6 +556,16 @@ impl PdfEngine {
     ) -> Result<(), PdfError> {
         let pdfium_ref: &Pdfium = unsafe { &*self.pdfium };
         tools::images_to_pdf_impl(pdfium_ref, &image_paths, &output_path)
+    }
+
+    pub fn apply_pdf_edits(
+        &self,
+        input_path: String,
+        pages: Vec<EditPageSpec>,
+        output_path: String,
+    ) -> Result<(), PdfError> {
+        let pdfium_ref: &Pdfium = unsafe { &*self.pdfium };
+        tools::apply_pdf_edits_impl(pdfium_ref, &input_path, &pages, &output_path)
     }
 }
 

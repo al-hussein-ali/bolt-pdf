@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui.markdown
+package com.bolt.pdf.ui.markdown
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString

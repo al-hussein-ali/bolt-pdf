@@ -1,4 +1,4 @@
-package com.velocity.pdf
+package com.bolt.pdf
 
 import android.app.PendingIntent
 import android.content.ContentValues

@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape

@@ -1,7 +1,8 @@
-package com.velocity.pdf
+package com.bolt.pdf
 
 import android.Manifest
 import android.app.Application
+import android.app.LocaleManager
 import android.app.PendingIntent
 import android.content.ContentUris
 import android.content.Context
@@ -12,18 +13,25 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.LocaleList
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.annotation.StringRes
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.velocity.pdf.ui.AppLanguage
-import com.velocity.pdf.ui.ImageToPdfEntry
-import com.velocity.pdf.ui.MarkdownDocumentState
-import com.velocity.pdf.ui.MergePdfEntry
-import com.velocity.pdf.ui.PageRangeSpec
-import com.velocity.pdf.ui.SplitTarget
+import com.bolt.pdf.ui.EditorPageItem
+import com.bolt.pdf.ui.EditorPageKind
+import com.bolt.pdf.ui.ImageToPdfEntry
+import com.bolt.pdf.ui.MarkdownDocumentState
+import com.bolt.pdf.ui.MergePdfEntry
+import com.bolt.pdf.ui.PageRangeSpec
+import com.bolt.pdf.ui.PdfEditorSession
+import com.bolt.pdf.ui.SYSTEM_LANGUAGE_TAG
+import com.bolt.pdf.ui.SplitTarget
+import com.bolt.pdf.ui.createLocalizedContext
+import com.bolt.pdf.ui.renderTextBoxOverlayPng
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -172,12 +180,31 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         return runCatching { enumValueOf<T>(raw) }.getOrDefault(default)
     }
 
-    private val isArabic: Boolean
-        get() = _appLanguage.value == AppLanguage.ARABIC
+    private fun loadSavedLanguageTag(): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val localeManager = appContext.getSystemService(LocaleManager::class.java)
+            val appLocales = localeManager?.applicationLocales
+            if (appLocales != null && !appLocales.isEmpty) {
+                return appLocales[0].toLanguageTag()
+            }
+        }
+        val raw = prefs.getString("app_language", null) ?: return SYSTEM_LANGUAGE_TAG
+        return when (raw) {
+            "ENGLISH" -> "en"
+            "ARABIC" -> "ar"
+            else -> raw
+        }
+    }
 
-    private fun msg(en: String, ar: String): String = if (isArabic) ar else en
+    private fun localizedContext(): Context =
+        createLocalizedContext(appContext, _appLanguageTag.value)
 
-    private fun unknownErrorText(): String = msg("Unknown error", "خطأ غير معروف")
+    private fun str(@StringRes resId: Int, vararg args: Any): String {
+        val ctx = localizedContext()
+        return if (args.isEmpty()) ctx.getString(resId) else ctx.getString(resId, *args)
+    }
+
+    private fun unknownErrorText(): String = str(R.string.msg_unknown_error)
 
     private fun saveEnumPref(key: String, value: Enum<*>) {
         prefs.edit().putString(key, value.name).apply()
@@ -222,11 +249,14 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     )
     val globalDarkMode: StateFlow<Boolean> = _globalDarkMode.asStateFlow()
 
-    private val _appLanguage = MutableStateFlow(loadEnumPref("app_language", AppLanguage.ENGLISH))
-    val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
+    private val _appLanguageTag = MutableStateFlow(loadSavedLanguageTag())
+    val appLanguageTag: StateFlow<String> = _appLanguageTag.asStateFlow()
 
     private val _markdownState = MutableStateFlow<MarkdownDocumentState?>(null)
     val markdownState: StateFlow<MarkdownDocumentState?> = _markdownState.asStateFlow()
+
+    private val _editorSession = MutableStateFlow<PdfEditorSession?>(null)
+    val editorSession: StateFlow<PdfEditorSession?> = _editorSession.asStateFlow()
 
     private val _isToolProcessing = MutableStateFlow(false)
     val isToolProcessing: StateFlow<Boolean> = _isToolProcessing.asStateFlow()
@@ -340,9 +370,9 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         val count = recentItems.size + deviceItems.size
         _snackbarMessages.tryEmit(
             if (makeFavorite) {
-                msg("Added $count file(s) to favorites", "تمت إضافة $count ملف(ات) إلى المفضلة")
+                str(R.string.msg_added_to_favorites, count)
             } else {
-                msg("Removed $count file(s) from favorites", "تمت إزالة $count ملف(ات) من المفضلة")
+                str(R.string.msg_removed_from_favorites, count)
             }
         )
     }
@@ -358,10 +388,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             }
             refreshRecentFiles()
             _snackbarMessages.tryEmit(
-                msg(
-                    "Removed ${fileHashes.size} file(s) from recent",
-                    "تمت إزالة ${fileHashes.size} ملف(ات) من الأخيرة"
-                )
+                str(R.string.msg_removed_from_recent, fileHashes.size)
             )
         }
     }
@@ -408,18 +435,9 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
             _snackbarMessages.tryEmit(
                 when {
-                    deletedCount == items.size -> msg(
-                        "Deleted $deletedCount file(s) from device",
-                        "تم حذف $deletedCount ملف(ات) من الجهاز"
-                    )
-                    deletedCount > 0 -> msg(
-                        "Deleted $deletedCount of ${items.size} file(s)",
-                        "تم حذف $deletedCount من أصل ${items.size} ملف(ات)"
-                    )
-                    else -> msg(
-                        "Unable to delete selected file(s). Check storage permission.",
-                        "تعذر حذف الملفات المحددة. تحقق من إذن التخزين."
-                    )
+                    deletedCount == items.size -> str(R.string.msg_deleted_from_device, deletedCount)
+                    deletedCount > 0 -> str(R.string.msg_deleted_partial, deletedCount, items.size)
+                    else -> str(R.string.msg_unable_to_delete)
                 }
             )
         }
@@ -451,8 +469,9 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                         MediaStore.Files.FileColumns.DATA
                     )
                     val selection = "${MediaStore.Files.FileColumns.MIME_TYPE} = ? OR " +
-                        "LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ?"
-                    val selectionArgs = arrayOf("application/pdf", "%.pdf")
+                        "LOWER(${MediaStore.Files.FileColumns.DISPLAY_NAME}) LIKE ? OR " +
+                        "LOWER(${MediaStore.Files.FileColumns.DATA}) LIKE ?"
+                    val selectionArgs = arrayOf("application/pdf", "%.pdf", "%.pdf")
                     appContext.contentResolver.query(
                         collection,
                         projection,
@@ -467,11 +486,13 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                         val dataCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATA)
                         while (cursor.moveToNext()) {
                             val id = if (idCol >= 0) cursor.getLong(idCol) else continue
+                            val path = if (dataCol >= 0) cursor.getString(dataCol) else null
                             val name = (if (nameCol >= 0) cursor.getString(nameCol) else null)
-                                ?.takeIf { it.isNotBlank() } ?: continue
+                                ?.takeIf { it.isNotBlank() }
+                                ?: path?.let { File(it).name }?.takeIf { it.isNotBlank() }
+                                ?: continue
                             val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
                             val dateMod = if (dateCol >= 0) cursor.getLong(dateCol) else 0L
-                            val path = if (dataCol >= 0) cursor.getString(dataCol) else null
                             val folder = path?.let { File(it).parentFile?.name } ?: "Device"
                             val contentUri = ContentUris.withAppendedId(collection, id)
                             val key = path?.lowercase() ?: "${name.lowercase()}_$size"
@@ -489,11 +510,24 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                // 2. Full storage scan when All Files / Read Storage permission is granted
+                // 2. Full storage scan (internal + removable SD card) when storage permission is granted
                 if (granted) {
-                    val root = Environment.getExternalStorageDirectory()
-                    if (root.exists() && root.canRead()) {
-                        scanPdfDirectory(root, results)
+                    val roots = linkedSetOf<File>()
+                    val primaryRoot = Environment.getExternalStorageDirectory()
+                    if (primaryRoot != null) {
+                        roots.add(primaryRoot)
+                    }
+                    appContext.getExternalFilesDirs(null).forEach { appDir ->
+                        val path = appDir?.absolutePath ?: return@forEach
+                        val androidIdx = path.indexOf("/Android/")
+                        if (androidIdx > 0) {
+                            roots.add(File(path.substring(0, androidIdx)))
+                        }
+                    }
+                    for (root in roots) {
+                        if (root.exists() && root.canRead()) {
+                            scanPdfDirectory(root, results)
+                        }
                     }
                 }
 
@@ -716,7 +750,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         return try {
             val file = File(path)
             if (!file.exists()) {
-                _snackbarMessages.tryEmit(msg("Cached PDF is no longer available.", "ملف PDF المؤقت لم يعد متاحاً."))
+                _snackbarMessages.tryEmit(str(R.string.msg_cached_pdf_unavailable))
                 return false
             }
             val result = engine.openFromPath(path, fileUri, displayName)
@@ -727,7 +761,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             false
         } catch (e: Exception) {
             _snackbarMessages.tryEmit(
-                msg("Unable to open cached PDF: ${e.message}", "تعذر فتح ملف PDF المؤقت: ${e.message}")
+                str(R.string.msg_unable_to_open_cached_pdf, e.message ?: unknownErrorText())
             )
             false
         }
@@ -746,7 +780,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
             if (!copied) {
                 tempFile.delete()
-                _snackbarMessages.tryEmit(msg("Unable to read PDF stream.", "تعذر قراءة ملف PDF."))
+                _snackbarMessages.tryEmit(str(R.string.msg_unable_to_read_pdf_stream))
                 return false
             }
 
@@ -768,7 +802,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             false
         } catch (e: Exception) {
             _snackbarMessages.tryEmit(
-                msg("Failed to open PDF: ${e.message}", "فشل فتح ملف PDF: ${e.message}")
+                str(R.string.msg_failed_to_open_pdf, e.message ?: unknownErrorText())
             )
             false
         }
@@ -849,18 +883,9 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handlePdfException(e: PdfException) {
         val errorText = when (e) {
-            is PdfException.PasswordRequired -> msg(
-                "Password-protected PDFs are not supported yet.",
-                "ملفات PDF المحمية بكلمة مرور غير مدعومة حالياً."
-            )
-            is PdfException.InvalidSource -> msg(
-                "Invalid PDF file or unreadable source.",
-                "ملف PDF غير صالح أو تعذر قراءة المصدر."
-            )
-            else -> msg(
-                "Could not open PDF: ${e.message ?: "Unknown error"}",
-                "تعذر فتح ملف PDF: ${e.message ?: "خطأ غير معروف"}"
-            )
+            is PdfException.PasswordRequired -> str(R.string.msg_password_protected_unsupported)
+            is PdfException.InvalidSource -> str(R.string.msg_invalid_pdf_source)
+            else -> str(R.string.msg_could_not_open_pdf, e.message ?: unknownErrorText())
         }
         _snackbarMessages.tryEmit(errorText)
     }
@@ -878,12 +903,19 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         _readerState.value = null
     }
 
-    suspend fun getPageTextContent(pageIndex: Int): PageTextContent? = withContext(Dispatchers.Default) {
-        val state = _readerState.value ?: return@withContext null
-        val key = "${state.progress.fileHash}_${pageIndex}_${state.progress.manualRotation.name}"
+    suspend fun getPageTextContent(pageIndex: Int): PageTextContent? {
+        val state = _readerState.value ?: return null
+        return getPageTextContent(pageIndex, state.progress.manualRotation)
+    }
+
+    suspend fun getPageTextContent(pageIndex: Int, rotation: PageRotation): PageTextContent? = withContext(Dispatchers.Default) {
+        val hash = _readerState.value?.progress?.fileHash
+            ?: _editorSession.value?.fileHash
+            ?: return@withContext null
+        val key = "${hash}_${pageIndex}_${rotation.name}"
         pageTextCache[key]?.let { return@withContext it }
         runCatching {
-            engine.getPageTextContent(pageIndex.toUInt(), state.progress.manualRotation)
+            engine.getPageTextContent(pageIndex.toUInt(), rotation)
         }.onSuccess { content ->
             synchronized(pageTextCache) {
                 pageTextCache[key] = content
@@ -918,7 +950,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }.onFailure { err ->
                 _snackbarMessages.tryEmit(
-                    msg("Failed to save highlight: ${err.message}", "فشل حفظ التمييز: ${err.message}")
+                    str(R.string.msg_failed_to_save_highlight, err.message ?: unknownErrorText())
                 )
             }
         }
@@ -1096,10 +1128,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 engine.saveProgress(item.copy(displayName = finalName))
             }.onFailure { e ->
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Unable to rename PDF: ${e.message ?: "Unknown error"}",
-                        "تعذر إعادة تسمية PDF: ${e.message ?: "خطأ غير معروف"}"
-                    )
+                    str(R.string.msg_unable_to_rename_pdf, e.message ?: unknownErrorText())
                 )
             }
             refreshRecentFiles()
@@ -1232,7 +1261,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 // Expected when superseded by a newer keystroke
             } catch (e: Exception) {
                 _readerState.update { it?.copy(isSearching = false) }
-                _snackbarMessages.tryEmit(msg("Search error: ${e.message}", "خطأ في البحث: ${e.message}"))
+                _snackbarMessages.tryEmit(str(R.string.msg_search_error, e.message ?: unknownErrorText()))
             }
         }
     }
@@ -1349,10 +1378,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Unable to prepare PDF for sharing: ${e.message ?: "Unknown error"}",
-                        "تعذر تجهيز ملف PDF للمشاركة: ${e.message ?: "خطأ غير معروف"}"
-                    )
+                    str(R.string.msg_unable_to_prepare_share, e.message ?: unknownErrorText())
                 )
             } finally {
                 _isSharingDocument.value = false
@@ -1382,7 +1408,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (!openedInEngine) {
                     _snackbarMessages.tryEmit(
-                        msg("PDF file is no longer accessible for sharing.", "ملف PDF لم يعد متاحاً للمشاركة.")
+                        str(R.string.msg_pdf_not_accessible_for_sharing)
                     )
                     return@launch
                 }
@@ -1395,10 +1421,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Unable to prepare PDF for sharing: ${e.message ?: "Unknown error"}",
-                        "تعذر تجهيز ملف PDF للمشاركة: ${e.message ?: "خطأ غير معروف"}"
-                    )
+                    str(R.string.msg_unable_to_prepare_share, e.message ?: unknownErrorText())
                 )
             } finally {
                 if (openedInEngine && _readerState.value == null) {
@@ -1431,9 +1454,33 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         return uri to sanitized
     }
 
-    fun setAppLanguage(language: AppLanguage) {
-        _appLanguage.value = language
-        saveEnumPref("app_language", language)
+    fun setAppLanguageTag(languageTag: String) {
+        _appLanguageTag.value = languageTag
+        prefs.edit().putString("app_language", languageTag).apply()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val localeManager = appContext.getSystemService(LocaleManager::class.java)
+            localeManager?.applicationLocales = if (languageTag.isBlank()) {
+                LocaleList.getEmptyLocaleList()
+            } else {
+                LocaleList.forLanguageTags(languageTag)
+            }
+        }
+    }
+
+    fun syncLanguageFromSystemIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val localeManager = appContext.getSystemService(LocaleManager::class.java)
+            val appLocales = localeManager?.applicationLocales
+            val systemTag = if (appLocales != null && !appLocales.isEmpty) {
+                appLocales[0].toLanguageTag()
+            } else {
+                SYSTEM_LANGUAGE_TAG
+            }
+            if (!systemTag.equals(_appLanguageTag.value, ignoreCase = true)) {
+                _appLanguageTag.value = systemTag
+                prefs.edit().putString("app_language", systemTag).apply()
+            }
+        }
     }
 
     fun setGlobalDarkMode(enabled: Boolean) {
@@ -1451,14 +1498,11 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 if (text != null) {
                     _markdownState.value = MarkdownDocumentState(displayName = name, content = text)
                 } else {
-                    _snackbarMessages.tryEmit(msg("Unable to read Markdown file.", "تعذر قراءة ملف الماركداون."))
+                    _snackbarMessages.tryEmit(str(R.string.msg_unable_to_read_markdown))
                 }
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Unable to open Markdown: ${e.message ?: "Unknown error"}",
-                        "تعذر فتح ملف الماركداون: ${e.message ?: "خطأ غير معروف"}"
-                    )
+                    str(R.string.msg_unable_to_open_markdown, e.message ?: unknownErrorText())
                 )
             }
         }
@@ -1490,13 +1534,13 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         runPdfToolToUri(
             outputUri = outputUri,
             tempPrefix = "merged",
-            successMessage = msg("Merged PDF saved successfully", "تم حفظ ملف PDF المدمج بنجاح"),
-            errorPrefix = msg("Merge failed", "فشل الدمج"),
+            successMessage = str(R.string.msg_merged_pdf_saved),
+            errorPrefix = str(R.string.msg_merge_failed),
             onComplete = onComplete
         ) { _, outFile, tempFiles ->
             val inputPaths = items.mapIndexed { idx, entry ->
                 val resolved = resolveToReadableTempFile(entry.uri, entry.fallbackPath, "merge_$idx", ".pdf")
-                    ?: throw IllegalStateException(msg("Unable to read ${entry.displayName}", "تعذر قراءة ${entry.displayName}"))
+                    ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, entry.displayName))
                 if (resolved.second) tempFiles.add(resolved.first)
                 resolved.first.absolutePath
             }
@@ -1513,22 +1557,19 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         if (ranges.isEmpty()) return
         val isZip = ranges.size > 1
         val successMsg = if (isZip) {
-            msg(
-                "Split ZIP saved (${ranges.size} PDFs)",
-                "تم حفظ الملف المضغوط (${ranges.size} ملفات PDF)"
-            )
+            str(R.string.msg_split_zip_saved, ranges.size)
         } else {
-            msg("Split PDF saved successfully", "تم حفظ ملف PDF المقسّم بنجاح")
+            str(R.string.msg_split_pdf_saved)
         }
         runPdfToolToUri(
             outputUri = outputUri,
             tempPrefix = if (isZip) "split_zip" else "split",
             successMessage = successMsg,
-            errorPrefix = msg("Split failed", "فشل التقسيم"),
+            errorPrefix = str(R.string.msg_split_failed),
             onComplete = { ok -> onComplete(ok, isZip) }
         ) { tmpDir, outFile, tempFiles ->
             val resolved = resolveToReadableTempFile(target.uri, target.fallbackPath, "split_src", ".pdf")
-                ?: throw IllegalStateException(msg("Unable to read ${target.displayName}", "تعذر قراءة ${target.displayName}"))
+                ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, target.displayName))
             if (resolved.second) tempFiles.add(resolved.first)
             val srcPath = resolved.first.absolutePath
 
@@ -1577,20 +1618,330 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         runPdfToolToUri(
             outputUri = outputUri,
             tempPrefix = "images",
-            successMessage = msg(
-                "PDF created from ${items.size} image(s)",
-                "تم إنشاء ملف PDF من ${items.size} صورة"
-            ),
-            errorPrefix = msg("Image to PDF failed", "فشل تحويل الصور إلى PDF"),
+            successMessage = str(R.string.msg_pdf_created_from_images, items.size),
+            errorPrefix = str(R.string.msg_image_to_pdf_failed),
             onComplete = onComplete
         ) { _, outFile, tempFiles ->
             val inputPaths = items.mapIndexed { idx, entry ->
                 val resolved = resolveToReadableTempFile(entry.uri, null, "img_$idx", ".img")
-                    ?: throw IllegalStateException(msg("Unable to read ${entry.displayName}", "تعذر قراءة ${entry.displayName}"))
+                    ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, entry.displayName))
                 if (resolved.second) tempFiles.add(resolved.first)
                 resolved.first.absolutePath
             }
             engine.imagesToPdf(inputPaths, outFile.absolutePath)
+        }
+    }
+
+    fun openPdfForEdit(
+        uri: Uri,
+        displayName: String,
+        fallbackPath: String? = null,
+        initialPageIndex: Int = 0,
+        fromReader: Boolean = false,
+    ) {
+        val activeReader = _readerState.value
+        if (fromReader && activeReader != null) {
+            val fbPath = fallbackPath ?: activeReader.progress.fallbackCachePath
+            _editorSession.value = PdfEditorSession(
+                sourceUri = uri,
+                displayName = displayName,
+                fallbackPath = fbPath,
+                fileHash = activeReader.progress.fileHash,
+                canReplaceOriginal = canOverwriteSource(uri, fbPath),
+                initialPageIndex = initialPageIndex.coerceIn(0, (activeReader.dimensions.size - 1).coerceAtLeast(0)),
+                returnToReader = true,
+                dimensions = activeReader.dimensions
+            )
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _isOpeningDocument.value = true
+            try {
+                val resolved = resolveToReadableTempFile(uri, fallbackPath, "edit_open", ".pdf")
+                if (resolved == null) {
+                    _snackbarMessages.tryEmit(str(R.string.msg_unable_to_read_file, displayName))
+                    return@launch
+                }
+                val (file, _) = resolved
+                val result = engine.openFromPath(file.absolutePath, uri.toString(), displayName)
+                val dims = engine.getPageDimensions(PageRotation.DEG0)
+                _editorSession.value = PdfEditorSession(
+                    sourceUri = uri,
+                    displayName = displayName,
+                    fallbackPath = fallbackPath ?: file.absolutePath,
+                    fileHash = result.progress.fileHash,
+                    canReplaceOriginal = canOverwriteSource(uri, fallbackPath),
+                    initialPageIndex = initialPageIndex.coerceIn(0, (dims.size - 1).coerceAtLeast(0)),
+                    returnToReader = false,
+                    dimensions = dims
+                )
+            } catch (e: Exception) {
+                _snackbarMessages.tryEmit(str(R.string.msg_could_not_open_pdf, e.message ?: unknownErrorText()))
+            } finally {
+                _isOpeningDocument.value = false
+            }
+        }
+    }
+
+    fun closePdfEditor() {
+        val session = _editorSession.value ?: return
+        _editorSession.value = null
+        if (!session.returnToReader) {
+            viewModelScope.launch(Dispatchers.IO) {
+                engine.closeDocument()
+            }
+        }
+    }
+
+    private fun resolveWritableFile(uri: Uri): File? {
+        if (uri.scheme == "file" && uri.path != null) {
+            val f = File(uri.path!!)
+            if (f.exists() && f.canWrite()) return f
+        }
+        if (uri.scheme == "content") {
+            val path = runCatching {
+                appContext.contentResolver.query(
+                    uri,
+                    arrayOf(MediaStore.Files.FileColumns.DATA),
+                    null,
+                    null,
+                    null
+                )?.use { c ->
+                    val col = c.getColumnIndex(MediaStore.Files.FileColumns.DATA)
+                    if (col >= 0 && c.moveToFirst()) c.getString(col) else null
+                }
+            }.getOrNull()
+            if (!path.isNullOrBlank()) {
+                val f = File(path)
+                if (f.exists() && f.canWrite()) return f
+            }
+        }
+        return null
+    }
+
+    private fun canOverwriteSource(uri: Uri, fallbackPath: String?): Boolean {
+        if (resolveWritableFile(uri) != null) return true
+        if (uri.scheme == "content") {
+            val writable = runCatching {
+                appContext.contentResolver.openFileDescriptor(uri, "rw")?.use { true } ?: false
+            }.getOrDefault(false)
+            if (writable) return true
+        }
+        if (!fallbackPath.isNullOrBlank()) {
+            val f = File(fallbackPath)
+            if (f.exists() && f.canWrite()) return true
+        }
+        return false
+    }
+
+    private fun buildNativeEditSpecs(
+        pages: List<EditorPageItem>,
+        tmpDir: File,
+        tempFiles: MutableList<File>,
+    ): List<uniffi.pdf_core.EditPageSpec> {
+        val externalPathCache = mutableMapOf<Uri, String>()
+        return pages.mapIndexed { pageIdx, item ->
+            val source = when (val kind = item.kind) {
+                is EditorPageKind.Original -> uniffi.pdf_core.EditPageSource.Original(
+                    pageIndex = kind.pageIndex.toUInt()
+                )
+                is EditorPageKind.Blank -> uniffi.pdf_core.EditPageSource.Blank(
+                    widthPts = kind.widthPts,
+                    heightPts = kind.heightPts
+                )
+                is EditorPageKind.Image -> {
+                    val resolved = resolveToReadableTempFile(kind.uri, null, "edit_img_$pageIdx", ".img")
+                        ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, kind.displayName))
+                    if (resolved.second) tempFiles.add(resolved.first)
+                    uniffi.pdf_core.EditPageSource.Image(path = resolved.first.absolutePath)
+                }
+                is EditorPageKind.ExternalPdf -> {
+                    val path = externalPathCache.getOrPut(kind.uri) {
+                        val resolved = resolveToReadableTempFile(kind.uri, null, "edit_ext_$pageIdx", ".pdf")
+                            ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, kind.displayName))
+                        if (resolved.second) tempFiles.add(resolved.first)
+                        resolved.first.absolutePath
+                    }
+                    uniffi.pdf_core.EditPageSource.ExternalPdf(
+                        path = path,
+                        pageIndex = kind.pageIndex.toUInt()
+                    )
+                }
+            }
+
+            val effW = item.effectiveWidthPts()
+            val effH = item.effectiveHeightPts()
+            val textOps = item.textEdits.mapIndexedNotNull { boxIdx, box ->
+                val hasCover = box.coverBackground &&
+                    box.coverLeft != null && box.coverTop != null &&
+                    box.coverRight != null && box.coverBottom != null
+                if (box.text.isEmpty() && !hasCover) return@mapIndexedNotNull null
+
+                val needsBitmapRender = box.text.isNotEmpty() && (
+                    box.text.any { it.code > 127 } ||
+                        box.text.contains('\n') ||
+                        item.rotationDegrees % 360 != 0
+                    )
+                var overlayPath: String? = null
+                if (needsBitmapRender) {
+                    val pngFile = File(tmpDir, "edit_txt_${pageIdx}_${boxIdx}_${System.currentTimeMillis()}.png")
+                    if (renderTextBoxOverlayPng(box, effW, effH, pngFile)) {
+                        tempFiles.add(pngFile)
+                        overlayPath = pngFile.absolutePath
+                    }
+                }
+
+                uniffi.pdf_core.PdfTextEditOp(
+                    coverLeft = if (box.coverBackground) (box.coverLeft ?: box.left) else null,
+                    coverTop = if (box.coverBackground) (box.coverTop ?: box.top) else null,
+                    coverRight = if (box.coverBackground) (box.coverRight ?: box.right) else null,
+                    coverBottom = if (box.coverBackground) (box.coverBottom ?: box.bottom) else null,
+                    coverColorArgb = 0xFFFFFFFFu,
+                    left = box.left,
+                    top = box.top,
+                    right = box.right,
+                    bottom = box.bottom,
+                    text = box.text,
+                    fontSizePts = box.fontSizePts,
+                    colorArgb = box.colorArgb.toUInt(),
+                    isBold = box.isBold,
+                    overlayImagePath = overlayPath
+                )
+            }
+
+            uniffi.pdf_core.EditPageSpec(
+                source = source,
+                rotationDegrees = item.rotationDegrees,
+                textEdits = textOps
+            )
+        }
+    }
+
+    fun saveEditedPdfAsNewFile(
+        session: PdfEditorSession,
+        pages: List<EditorPageItem>,
+        outputUri: Uri,
+        onComplete: (Boolean) -> Unit,
+    ) {
+        if (pages.isEmpty()) return
+        runPdfToolToUri(
+            outputUri = outputUri,
+            tempPrefix = "edited",
+            successMessage = str(R.string.msg_pdf_edits_saved),
+            errorPrefix = str(R.string.msg_pdf_edit_failed, "").removeSuffix(": "),
+            onComplete = { ok ->
+                if (ok) {
+                    refreshDevicePdfs(onlyIfNeeded = false)
+                    closePdfEditor()
+                }
+                onComplete(ok)
+            }
+        ) { tmpDir, outFile, tempFiles ->
+            val resolvedSrc = resolveToReadableTempFile(session.sourceUri, session.fallbackPath, "edit_src", ".pdf")
+                ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, session.displayName))
+            if (resolvedSrc.second) tempFiles.add(resolvedSrc.first)
+            val specs = buildNativeEditSpecs(pages, tmpDir, tempFiles)
+            engine.applyPdfEdits(resolvedSrc.first.absolutePath, specs, outFile.absolutePath)
+        }
+    }
+
+    fun replaceEditedPdf(
+        session: PdfEditorSession,
+        pages: List<EditorPageItem>,
+        newFileName: String,
+        onComplete: (Boolean) -> Unit,
+    ) {
+        if (pages.isEmpty() || _isToolProcessing.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _isToolProcessing.value = true
+            val tempFiles = mutableListOf<File>()
+            var outFile: File? = null
+            var ok = false
+            var finalUri = session.sourceUri
+            var finalName = session.displayName
+            var finalFallback = session.fallbackPath
+            try {
+                val tmpDir = File(appContext.cacheDir, "tool_tmp").apply { mkdirs() }
+                outFile = File(tmpDir, "edited_replace_${System.currentTimeMillis()}.pdf")
+                val resolvedSrc = resolveToReadableTempFile(session.sourceUri, session.fallbackPath, "edit_src", ".pdf")
+                    ?: throw IllegalStateException(str(R.string.msg_unable_to_read_file, session.displayName))
+                if (resolvedSrc.second) tempFiles.add(resolvedSrc.first)
+
+                val specs = buildNativeEditSpecs(pages, tmpDir, tempFiles)
+                engine.applyPdfEdits(resolvedSrc.first.absolutePath, specs, outFile.absolutePath)
+
+                val writableFile = resolveWritableFile(session.sourceUri)
+                if (writableFile != null) {
+                    outFile.inputStream().use { input ->
+                        writableFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    if (!newFileName.equals(writableFile.name, ignoreCase = false)) {
+                        val renamed = File(writableFile.parentFile, newFileName)
+                        if (!renamed.exists() && writableFile.renameTo(renamed)) {
+                            finalUri = Uri.fromFile(renamed)
+                            finalName = renamed.name
+                            finalFallback = renamed.absolutePath
+                        }
+                    }
+                } else {
+                    val stream = runCatching {
+                        appContext.contentResolver.openOutputStream(session.sourceUri, "wt")
+                    }.getOrNull() ?: appContext.contentResolver.openOutputStream(session.sourceUri)
+                    if (stream != null) {
+                        stream.use { output ->
+                            outFile.inputStream().use { input -> input.copyTo(output) }
+                        }
+                    } else if (!session.fallbackPath.isNullOrBlank()) {
+                        val fb = File(session.fallbackPath)
+                        if (fb.exists() && fb.canWrite()) {
+                            outFile.inputStream().use { input ->
+                                fb.outputStream().use { output -> input.copyTo(output) }
+                            }
+                        } else {
+                            throw IllegalStateException(str(R.string.msg_unable_to_write_destination))
+                        }
+                    } else {
+                        throw IllegalStateException(str(R.string.msg_unable_to_write_destination))
+                    }
+                }
+
+                // Also refresh cached copy if one exists
+                val cachedPath = session.fallbackPath
+                if (!cachedPath.isNullOrBlank()) {
+                    val cachedFile = File(cachedPath)
+                    if (cachedFile.exists() && cachedFile.canWrite() && cachedFile.absolutePath != writableFile?.absolutePath) {
+                        runCatching {
+                            outFile.inputStream().use { input ->
+                                cachedFile.outputStream().use { output -> input.copyTo(output) }
+                            }
+                        }
+                    }
+                }
+
+                ok = true
+                _snackbarMessages.tryEmit(str(R.string.msg_pdf_edits_replaced))
+            } catch (e: Exception) {
+                _snackbarMessages.tryEmit(str(R.string.msg_pdf_edit_failed, e.message ?: unknownErrorText()))
+            } finally {
+                tempFiles.forEach { it.delete() }
+                outFile?.delete()
+                _isToolProcessing.value = false
+            }
+
+            withContext(Dispatchers.Main) {
+                if (ok) {
+                    _editorSession.value = null
+                    refreshRecentFiles()
+                    refreshDevicePdfs(onlyIfNeeded = false)
+                    if (session.returnToReader) {
+                        openFromUri(finalUri)
+                    } else {
+                        viewModelScope.launch(Dispatchers.IO) { engine.closeDocument() }
+                    }
+                }
+                onComplete(ok)
+            }
         }
     }
 
@@ -1614,7 +1965,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 block(tmpDir, outFile, tempFiles)
                 appContext.contentResolver.openOutputStream(outputUri)?.use { outStream ->
                     outFile.inputStream().use { inStream -> inStream.copyTo(outStream) }
-                } ?: throw IllegalStateException(msg("Unable to write to destination", "تعذر الكتابة إلى الوجهة"))
+                } ?: throw IllegalStateException(str(R.string.msg_unable_to_write_destination))
                 ok = true
                 _snackbarMessages.tryEmit(successMessage)
             } catch (e: Exception) {
@@ -1657,7 +2008,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         return null
     }
 
-    private fun queryDisplayName(uri: Uri): String? {
+    fun queryDisplayName(uri: Uri): String? {
         if (uri.scheme == "content") {
             runCatching {
                 appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -1684,15 +2035,12 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             _driveAccountEmail.value = account?.email
             if (account?.email != null) {
                 _snackbarMessages.tryEmit(
-                    msg("Connected: ${account.email}", "تم الاتصال: ${account.email}")
+                    str(R.string.msg_google_connected, account.email ?: "")
                 )
             }
         }.onFailure { err ->
             _snackbarMessages.tryEmit(
-                msg(
-                    "Google Sign-In failed: ${err.message ?: unknownErrorText()}",
-                    "فشل تسجيل الدخول إلى Google: ${err.message ?: unknownErrorText()}"
-                )
+                str(R.string.msg_google_sign_in_failed, err.message ?: unknownErrorText())
             )
         }
     }
@@ -1703,7 +2051,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             _driveAccountEmail.value = null
             _driveSyncConflicts.value = emptyList()
             _snackbarMessages.tryEmit(
-                msg("Google account disconnected", "تم فصل حساب Google")
+                str(R.string.msg_google_disconnected)
             )
         }
     }
@@ -1721,16 +2069,13 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     private fun requireOnlineAndAccount(): Boolean {
         if (_driveAccountEmail.value == null) {
             _snackbarMessages.tryEmit(
-                msg("Please connect a Google account first", "يرجى ربط حساب Google أولاً")
+                str(R.string.msg_connect_google_first)
             )
             return false
         }
         if (!driveSyncManager.isOnline()) {
             _snackbarMessages.tryEmit(
-                msg(
-                    "No internet connection. Connect to the internet to use Google Drive sync.",
-                    "لا يوجد اتصال بالإنترنت. اتصل بالإنترنت لاستخدام مزامنة Google Drive."
-                )
+                str(R.string.msg_no_internet_drive)
             )
             return false
         }
@@ -1750,7 +2095,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         if (!requireOnlineAndAccount()) return
         if (items.isEmpty()) {
             _snackbarMessages.tryEmit(
-                msg("No recent files to upload", "لا توجد ملفات حديثة للرفع")
+                str(R.string.msg_no_recent_to_upload)
             )
             return
         }
@@ -1787,10 +2132,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 _driveAuthPendingIntent.tryEmit(authEx.pendingIntent)
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Upload failed: ${e.message ?: unknownErrorText()}",
-                        "فشل الرفع: ${e.message ?: unknownErrorText()}"
-                    )
+                    str(R.string.msg_upload_failed, e.message ?: unknownErrorText())
                 )
             } finally {
                 _isSyncingDrive.value = false
@@ -1802,7 +2144,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         if (!requireOnlineAndAccount()) return
         if (items.isEmpty()) {
             _snackbarMessages.tryEmit(
-                msg("No files selected to upload", "لم يتم تحديد ملفات للرفع")
+                str(R.string.msg_no_files_selected_to_upload)
             )
             return
         }
@@ -1862,10 +2204,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 _driveAuthPendingIntent.tryEmit(authEx.pendingIntent)
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Upload failed: ${e.message ?: unknownErrorText()}",
-                        "فشل الرفع: ${e.message ?: unknownErrorText()}"
-                    )
+                    str(R.string.msg_upload_failed, e.message ?: unknownErrorText())
                 )
             } finally {
                 _isSyncingDrive.value = false
@@ -1880,7 +2219,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         try {
             if (candidates.isEmpty()) {
                 _snackbarMessages.tryEmit(
-                    msg("No readable PDF files to upload", "لا توجد ملفات PDF قابلة للقراءة للرفع")
+                    str(R.string.msg_no_readable_pdfs_to_upload)
                 )
                 return
             }
@@ -1893,9 +2232,10 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 val remainingBytes = driveSyncManager.getRemainingStorageBytes(token)
                 if (remainingBytes != null && bytesNeeded > remainingBytes) {
                     _snackbarMessages.tryEmit(
-                        msg(
-                            "Not enough Google Drive space. Need ${formatStorageBytes(bytesNeeded)}, only ${formatStorageBytes(remainingBytes)} available.",
-                            "لا توجد مساحة كافية في Google Drive. المطلوب ${formatStorageBytes(bytesNeeded)}، المتاح فقط ${formatStorageBytes(remainingBytes)}."
+                        str(
+                            R.string.msg_not_enough_drive_space,
+                            formatStorageBytes(bytesNeeded),
+                            formatStorageBytes(remainingBytes)
                         )
                     )
                     return
@@ -1961,15 +2301,9 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 _driveSyncConflicts.value = conflicts
             }
             val summary = if (uploadedCount > 0) {
-                msg(
-                    "Uploaded $uploadedCount file(s) to Google Drive",
-                    "تم رفع $uploadedCount ملف(ات) إلى Google Drive"
-                )
+                str(R.string.msg_uploaded_to_drive, uploadedCount)
             } else {
-                msg(
-                    "Synced metadata for $skippedCount file(s) with Google Drive",
-                    "تمت مزامنة بيانات $skippedCount ملف(ات) مع Google Drive"
-                )
+                str(R.string.msg_synced_metadata_drive, skippedCount)
             }
             _snackbarMessages.tryEmit(summary)
         } finally {
@@ -2000,10 +2334,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 val (_, remoteItems) = driveSyncManager.loadManifest(token)
                 if (remoteItems.isEmpty()) {
                     _snackbarMessages.tryEmit(
-                        msg(
-                            "No synced files found in Google Drive yet",
-                            "لا توجد ملفات متزامنة في Google Drive بعد"
-                        )
+                        str(R.string.msg_no_synced_files_drive)
                     )
                     return@launch
                 }
@@ -2131,18 +2462,13 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val summary = when {
-                    downloadedCount > 0 || linkedLocalCount > 0 -> msg(
-                        "Synced: $downloadedCount downloaded, $linkedLocalCount found on device",
-                        "تمت المزامنة: تم تنزيل $downloadedCount، ووجد $linkedLocalCount على الجهاز"
+                    downloadedCount > 0 || linkedLocalCount > 0 -> str(
+                        R.string.msg_synced_summary,
+                        downloadedCount,
+                        linkedLocalCount
                     )
-                    conflicts.isNotEmpty() -> msg(
-                        "Found ${conflicts.size} sync conflict(s) to review",
-                        "تم العثور على ${conflicts.size} تعارض(ات) في المزامنة للمراجعة"
-                    )
-                    else -> msg(
-                        "Everything is already up to date",
-                        "كل شيء محدث بالفعل"
-                    )
+                    conflicts.isNotEmpty() -> str(R.string.msg_sync_conflicts_found, conflicts.size)
+                    else -> str(R.string.msg_already_up_to_date)
                 }
                 _snackbarMessages.tryEmit(summary)
             } catch (authEx: DriveAuthResolutionException) {
@@ -2150,10 +2476,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 _driveAuthPendingIntent.tryEmit(authEx.pendingIntent)
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Sync failed: ${e.message ?: unknownErrorText()}",
-                        "فشلت المزامنة: ${e.message ?: unknownErrorText()}"
-                    )
+                    str(R.string.msg_sync_failed, e.message ?: unknownErrorText())
                 )
             } finally {
                 _isSyncingDrive.value = false
@@ -2230,17 +2553,14 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
                 _driveSyncConflicts.value = emptyList()
                 refreshRecentFiles()
                 _snackbarMessages.tryEmit(
-                    msg("Sync conflicts resolved", "تم حل تعارضات المزامنة")
+                    str(R.string.msg_sync_conflicts_resolved)
                 )
             } catch (authEx: DriveAuthResolutionException) {
                 pendingDriveRetryAction = { resolveDriveConflicts(resolutions) }
                 _driveAuthPendingIntent.tryEmit(authEx.pendingIntent)
             } catch (e: Exception) {
                 _snackbarMessages.tryEmit(
-                    msg(
-                        "Failed to resolve conflicts: ${e.message ?: unknownErrorText()}",
-                        "فشل حل التعارضات: ${e.message ?: unknownErrorText()}"
-                    )
+                    str(R.string.msg_failed_to_resolve_conflicts, e.message ?: unknownErrorText())
                 )
             } finally {
                 _isSyncingDrive.value = false

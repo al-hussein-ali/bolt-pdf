@@ -58,7 +58,7 @@ velocity-pdf/
 │           ├── AndroidManifest.xml     # ACTION_VIEW PDF intent-filter & configChanges
 │           ├── jniLibs/
 │           │   └── arm64-v8a/          # libpdf_core.so + libpdfium.so
-│           └── java/com/velocity/pdf/
+│           └── java/com/bolt/pdf/
 │               ├── MainActivity.kt     # Intent handling, FD detachment, URI permission fallback
 │               ├── NativeZeroCopy.kt   # JNI bridge declaration for direct Bitmap rendering
 │               ├── PdfViewModel.kt     # StateFlow orchestration, search state, zoom tile jobs
@@ -286,8 +286,8 @@ Never hash an entire 500MB PDF on open. Compute `file_hash` from the memory-mapp
 
 ### 4.8 Zero-Copy Android Bitmap JNI Bridge (`pdf_core/src/android_jni.rs`)
 Implement both full-page and zoomed-tile zero-copy JNI functions that lock an `android.graphics.Bitmap` (`ARGB_8888`) via `AndroidBitmap_lockPixels`, render directly into the native pixel memory, apply `apply_night_filter_rgba` if `dark_mode` is enabled, and unlock:
-* `Java_com_velocity_pdf_NativeZeroCopy_renderPageDirect(...)`
-* `Java_com_velocity_pdf_NativeZeroCopy_renderZoomTileDirect(...)`
+* `Java_com_bolt_pdf_NativeZeroCopy_renderPageDirect(...)`
+* `Java_com_bolt_pdf_NativeZeroCopy_renderZoomTileDirect(...)`
 
 ---
 

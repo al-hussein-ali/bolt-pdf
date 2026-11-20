@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import android.Manifest
 import android.content.Intent
@@ -40,30 +40,30 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.velocity.pdf.ConflictResolutionChoice
-import com.velocity.pdf.DevicePdfItem
-import com.velocity.pdf.DriveSyncConflict
-import com.velocity.pdf.HomeDateFilter
-import com.velocity.pdf.HomeProgressFilter
-import com.velocity.pdf.HomeSizeFilter
-import com.velocity.pdf.HomeSortOption
-import com.velocity.pdf.ui.home.DevicePdfsTabContent
-import com.velocity.pdf.ui.home.DriveSyncConflictDialog
-import com.velocity.pdf.ui.home.FavoritesTabContent
-import com.velocity.pdf.ui.home.HomeFilterChipsRow
-import com.velocity.pdf.ui.home.HomeMainTopBar
-import com.velocity.pdf.ui.home.HomeSearchAndSortRow
-import com.velocity.pdf.ui.home.HomeSelectionTopBar
-import com.velocity.pdf.ui.home.OpeningDocumentOverlay
-import com.velocity.pdf.ui.home.PermanentDeleteDialog
-import com.velocity.pdf.ui.home.RecentTabContent
-import com.velocity.pdf.ui.home.RenamePdfDialog
-import com.velocity.pdf.ui.home.RtlSafeTabRow
-import com.velocity.pdf.ui.home.matchesDateFilter
-import com.velocity.pdf.ui.home.matchesProgressFilter
-import com.velocity.pdf.ui.home.matchesSizeFilter
-import com.velocity.pdf.ui.home.sortDeviceItems
-import com.velocity.pdf.ui.home.sortRecentItems
+import com.bolt.pdf.ConflictResolutionChoice
+import com.bolt.pdf.DevicePdfItem
+import com.bolt.pdf.DriveSyncConflict
+import com.bolt.pdf.HomeDateFilter
+import com.bolt.pdf.HomeProgressFilter
+import com.bolt.pdf.HomeSizeFilter
+import com.bolt.pdf.HomeSortOption
+import com.bolt.pdf.ui.home.DevicePdfsTabContent
+import com.bolt.pdf.ui.home.DriveSyncConflictDialog
+import com.bolt.pdf.ui.home.FavoritesTabContent
+import com.bolt.pdf.ui.home.HomeFilterChipsRow
+import com.bolt.pdf.ui.home.HomeMainTopBar
+import com.bolt.pdf.ui.home.HomeSearchAndSortRow
+import com.bolt.pdf.ui.home.HomeSelectionTopBar
+import com.bolt.pdf.ui.home.OpeningDocumentOverlay
+import com.bolt.pdf.ui.home.PermanentDeleteDialog
+import com.bolt.pdf.ui.home.RecentTabContent
+import com.bolt.pdf.ui.home.RenamePdfDialog
+import com.bolt.pdf.ui.home.RtlSafeTabRow
+import com.bolt.pdf.ui.home.matchesDateFilter
+import com.bolt.pdf.ui.home.matchesProgressFilter
+import com.bolt.pdf.ui.home.matchesSizeFilter
+import com.bolt.pdf.ui.home.sortDeviceItems
+import com.bolt.pdf.ui.home.sortRecentItems
 import uniffi.pdf_core.ReadingProgress
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -97,6 +97,8 @@ fun HomeScreen(
     onRenameRecent: (ReadingProgress, String) -> Unit,
     onShareRecent: (ReadingProgress) -> Unit,
     onShareDevicePdf: (DevicePdfItem) -> Unit,
+    onEditRecent: (ReadingProgress) -> Unit,
+    onEditDevicePdf: (DevicePdfItem) -> Unit,
     onMergeRecent: (ReadingProgress) -> Unit,
     onSplitRecent: (ReadingProgress) -> Unit,
     onMergeDevicePdf: (DevicePdfItem) -> Unit,
@@ -395,6 +397,7 @@ fun HomeScreen(
                         onToggleFavorite = onToggleFavoriteRecent,
                         onRename = ::startRename,
                         onShare = onShareRecent,
+                        onEdit = onEditRecent,
                         onMerge = onMergeRecent,
                         onSplit = onSplitRecent,
                         onDelete = { onRemoveRecent(it.fileHash) }
@@ -436,10 +439,12 @@ fun HomeScreen(
                         onToggleFavoriteDevice = onToggleFavoriteDevicePdf,
                         onRenameRecent = ::startRename,
                         onShareRecent = onShareRecent,
+                        onEditRecent = onEditRecent,
                         onMergeRecent = onMergeRecent,
                         onSplitRecent = onSplitRecent,
                         onDeleteRecent = { onRemoveRecent(it.fileHash) },
                         onShareDevice = onShareDevicePdf,
+                        onEditDevice = onEditDevicePdf,
                         onMergeDevice = onMergeDevicePdf,
                         onSplitDevice = onSplitDevicePdf
                     )
@@ -470,6 +475,7 @@ fun HomeScreen(
                         },
                         onToggleFavorite = onToggleFavoriteDevicePdf,
                         onShare = onShareDevicePdf,
+                        onEdit = onEditDevicePdf,
                         onMerge = onMergeDevicePdf,
                         onSplit = onSplitDevicePdf,
                         onUploadToDrive = { onUploadDevicePdfsToDrive(listOf(it)) }

@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult

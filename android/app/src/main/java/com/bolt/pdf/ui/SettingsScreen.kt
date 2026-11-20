@@ -1,4 +1,4 @@
-package com.velocity.pdf.ui
+package com.bolt.pdf.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -51,11 +51,11 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(
     darkMode: Boolean,
-    language: AppLanguage,
+    selectedLanguageTag: String,
     driveAccountEmail: String?,
     onBack: () -> Unit,
     onToggleDarkMode: (Boolean) -> Unit,
-    onSelectLanguage: (AppLanguage) -> Unit,
+    onSelectLanguage: (String) -> Unit,
     onConnectGoogleAccount: () -> Unit,
     onDisconnectGoogleAccount: () -> Unit,
     onOpenMergePdfs: () -> Unit,
@@ -130,15 +130,16 @@ fun SettingsScreen(
 
             SectionTitle(strings.language)
             SettingsCard {
-                AppLanguage.entries.forEachIndexed { index, lang ->
+                val localeOptions = supportedLocaleOptions(strings.systemDefaultLanguage)
+                localeOptions.forEachIndexed { index, option ->
                     if (index > 0) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     }
-                    val selected = lang == language
+                    val selected = option.tag.equals(selectedLanguageTag, ignoreCase = true)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelectLanguage(lang) }
+                            .clickable { onSelectLanguage(option.tag) }
                             .padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -149,7 +150,7 @@ fun SettingsScreen(
                         )
                         Spacer(modifier = Modifier.width(14.dp))
                         Text(
-                            text = lang.displayName,
+                            text = option.displayName,
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.weight(1f)

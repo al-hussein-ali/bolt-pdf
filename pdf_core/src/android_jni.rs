@@ -63,7 +63,7 @@ mod android_impl {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_velocity_pdf_NativeZeroCopy_renderPageDirect(
+    pub extern "system" fn Java_com_bolt_pdf_NativeZeroCopy_renderPageDirect(
         env: JNIEnv,
         _class: JClass,
         engine_ptr: jlong,
@@ -97,7 +97,7 @@ mod android_impl {
     }
 
     #[no_mangle]
-    pub extern "system" fn Java_com_velocity_pdf_NativeZeroCopy_renderZoomTileDirect(
+    pub extern "system" fn Java_com_bolt_pdf_NativeZeroCopy_renderZoomTileDirect(
         env: JNIEnv,
         _class: JClass,
         engine_ptr: jlong,
