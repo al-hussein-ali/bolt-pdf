@@ -43,6 +43,14 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+data class DriveStoredFile(
+    val id: String,
+    val name: String,
+    val sizeBytes: Long,
+    val modifiedTime: String,
+    val fileHash: String?,
+)
+
 data class DriveManifestItem(
     val fileHash: String,
     val displayName: String,
@@ -346,6 +354,64 @@ class GoogleDriveSyncManager(private val context: Context) {
             if (limit <= 0L) return@withContext null
             val usage = quota.optString("usage", "").toLongOrNull() ?: 0L
             (limit - usage).coerceAtLeast(0L)
+        }
+    }
+
+    /**
+     * Lists PDF files stored in the app's private Google Drive appDataFolder (excluding the sync manifest).
+     */
+    suspend fun listAppDataPdfFiles(accessToken: String): List<DriveStoredFile> = withContext(Dispatchers.IO) {
+        val url = "$DRIVE_FILES_URL?spaces=appDataFolder&pageSize=100&orderBy=modifiedTime%20desc&fields=files(id,name,size,modifiedTime,appProperties)"
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .get()
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("Failed to list Drive files (${response.code})")
+            }
+            val root = JSONObject(response.body?.string().orEmpty())
+            val files = root.optJSONArray("files") ?: return@withContext emptyList()
+            buildList {
+                for (i in 0 until files.length()) {
+                    val obj = files.optJSONObject(i) ?: continue
+                    val id = obj.optString("id", "")
+                    val name = obj.optString("name", "")
+                    if (id.isBlank() || name == MANIFEST_FILE_NAME) continue
+                    val size = obj.optString("size", "0").toLongOrNull() ?: 0L
+                    val modified = obj.optString("modifiedTime", "")
+                    val appProps = obj.optJSONObject("appProperties")
+                    val hash = appProps?.optString("fileHash", "")?.takeIf { it.isNotBlank() }
+                    add(
+                        DriveStoredFile(
+                            id = id,
+                            name = name,
+                            sizeBytes = size,
+                            modifiedTime = modified,
+                            fileHash = hash
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Permanently deletes a file from the app's private Google Drive appDataFolder.
+     */
+    suspend fun deleteAppDataFile(accessToken: String, fileId: String) = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$DRIVE_FILES_URL/$fileId")
+            .header("Authorization", "Bearer $accessToken")
+            .delete()
+            .build()
+
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful && response.code != 404) {
+                throw IllegalStateException("Drive delete failed (${response.code})")
+            }
         }
     }
 

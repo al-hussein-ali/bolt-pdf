@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -65,6 +66,7 @@ import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -327,7 +329,7 @@ fun PdfEditorScreen(
     BackHandler(enabled = !isSaving) { handleBack() }
 
     Scaffold(
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = WindowInsets.systemBars,
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { DismissibleSnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -683,17 +685,31 @@ private fun TextEditorWorkspace(
 
     val activeBox = page.textEdits.firstOrNull { it.id == activeTextBoxId }
     var showFontMenu by remember { mutableStateOf(false) }
+    var isPlacingNewBox by remember(page.id) { mutableStateOf(false) }
+    var isMovingActiveBox by remember(activeTextBoxId) { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize()) {
-        if (activeBox == null) {
+        if (isPlacingNewBox || isMovingActiveBox || activeBox == null) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                color = if (isPlacingNewBox || isMovingActiveBox) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerLow
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = strings.tapTextToEditHint,
+                    text = if (isPlacingNewBox || isMovingActiveBox) {
+                        strings.tapToPlaceHint
+                    } else {
+                        strings.tapTextToEditHint
+                    },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isPlacingNewBox || isMovingActiveBox) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
@@ -728,10 +744,48 @@ private fun TextEditorWorkspace(
                     modifier = Modifier
                         .fillMaxSize()
                         .clipToBounds()
-                        .pointerInput(page.id, page.textEdits, pageWidthPx, pageHeightPx) {
+                        .pointerInput(page.id, page.textEdits, isPlacingNewBox, isMovingActiveBox, activeBox?.id, pageWidthPx, pageHeightPx) {
                             detectTapGestures { offset ->
                                 val nx = (offset.x / pageWidthPx.toFloat()).coerceIn(0f, 1f)
                                 val ny = (offset.y / pageHeightPx.toFloat()).coerceIn(0f, 1f)
+
+                                if (isPlacingNewBox) {
+                                    isPlacingNewBox = false
+                                    val boxW = 0.65f
+                                    val leftPos = (nx - boxW * 0.25f).coerceIn(0.02f, 1f - boxW - 0.02f)
+                                    val topPos = (ny - 0.02f).coerceIn(0.02f, 0.88f)
+                                    val newBox = EditorTextBox(
+                                        text = "",
+                                        left = leftPos,
+                                        top = topPos,
+                                        right = (leftPos + boxW).coerceAtMost(0.98f),
+                                        bottom = (topPos + 0.08f).coerceAtMost(0.96f),
+                                        coverBackground = false,
+                                        fontSizePts = 16f,
+                                        colorArgb = 0xFF111111L,
+                                        isBold = false,
+                                    )
+                                    onAddTextBox(newBox)
+                                    return@detectTapGestures
+                                }
+
+                                if (isMovingActiveBox && activeBox != null) {
+                                    isMovingActiveBox = false
+                                    val w = activeBox.right - activeBox.left
+                                    val h = activeBox.bottom - activeBox.top
+                                    val newLeft = (nx - w * 0.5f).coerceIn(0f, (1f - w).coerceAtLeast(0f))
+                                    val newTop = (ny - h * 0.5f).coerceIn(0f, (1f - h).coerceAtLeast(0f))
+                                    onUpdateTextBox(
+                                        activeBox.copy(
+                                            left = newLeft,
+                                            top = newTop,
+                                            right = (newLeft + w).coerceAtMost(1f),
+                                            bottom = (newTop + h).coerceAtMost(1f)
+                                        ),
+                                        true
+                                    )
+                                    return@detectTapGestures
+                                }
 
                                 val hitExisting = page.textEdits.lastOrNull { box ->
                                     nx in (box.left - 0.02f)..(box.right + 0.02f) &&
@@ -763,101 +817,122 @@ private fun TextEditorWorkspace(
                         val fontSp = with(density) { (box.fontSizePts * ptsToPx).toSp() }
 
                         val focusRequester = remember(box.id) { FocusRequester() }
-                        val bringIntoViewRequester = remember(box.id) { BringIntoViewRequester() }
 
                         LaunchedEffect(isActive) {
                             if (isActive) {
+                                delay(80)
+                                runCatching { scrollState.animateScrollTo((by - 120).coerceAtLeast(0)) }
                                 runCatching { focusRequester.requestFocus() }
-                                delay(120)
-                                runCatching { bringIntoViewRequester.bringIntoView() }
                             }
                         }
 
-                        LaunchedEffect(isActive, box.text, box.top) {
-                            if (isActive) {
-                                runCatching { bringIntoViewRequester.bringIntoView() }
-                            }
-                        }
-
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .align(AbsoluteAlignment.TopLeft)
                                 .absoluteOffset { IntOffset(bx, by) }
                                 .width(bwDp)
                                 .wrapContentHeight()
-                                .bringIntoViewRequester(bringIntoViewRequester)
-                                .background(
-                                    color = if (box.coverBackground) Color.White else Color.Transparent,
-                                    shape = RoundedCornerShape(4.dp)
+                        ) {
+                            if (isActive) {
+                                Surface(
+                                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .pointerInput(box.id, pageWidthPx, pageHeightPx) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                val dx = dragAmount.x / pageWidthPx.toFloat()
+                                                val dy = dragAmount.y / pageHeightPx.toFloat()
+                                                val w = box.right - box.left
+                                                val h = box.bottom - box.top
+                                                val newLeft = (box.left + dx).coerceIn(0f, (1f - w).coerceAtLeast(0f))
+                                                val newTop = (box.top + dy).coerceIn(0f, (1f - h).coerceAtLeast(0f))
+                                                onUpdateTextBox(
+                                                    box.copy(
+                                                        left = newLeft,
+                                                        top = newTop,
+                                                        right = (newLeft + w).coerceAtMost(1f),
+                                                        bottom = (newTop + h).coerceAtMost(1f)
+                                                    ),
+                                                    false
+                                                )
+                                            }
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.OpenWith,
+                                            contentDescription = strings.moveTextBox,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = strings.moveTextBox,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    }
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .wrapContentHeight()
+                                    .background(
+                                        color = if (box.coverBackground) Color.White else Color.Transparent,
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .border(
+                                        width = if (isActive) 1.75.dp else 0.75.dp,
+                                        color = if (isActive) MaterialTheme.colorScheme.primary else Color(0x661976D2),
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                val textStyle = TextStyle(
+                                    color = Color(box.colorArgb),
+                                    fontSize = fontSp,
+                                    fontWeight = if (box.isBold) FontWeight.Bold else FontWeight.Normal,
+                                    lineHeight = fontSp * 1.25f,
+                                    textDirection = TextDirection.Content
                                 )
-                                .border(
-                                    width = if (isActive) 1.75.dp else 0.75.dp,
-                                    color = if (isActive) MaterialTheme.colorScheme.primary else Color(0x661976D2),
-                                    shape = RoundedCornerShape(4.dp)
-                                )
-                                .pointerInput(box.id, pageWidthPx, pageHeightPx) {
-                                    detectDragGestures(
-                                        onDragStart = { onSelectTextBox(box.id) },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            val dx = dragAmount.x / pageWidthPx.toFloat()
-                                            val dy = dragAmount.y / pageHeightPx.toFloat()
-                                            val w = box.right - box.left
-                                            val h = box.bottom - box.top
-                                            val newLeft = (box.left + dx).coerceIn(0f, (1f - w).coerceAtLeast(0f))
-                                            val newTop = (box.top + dy).coerceIn(0f, (1f - h).coerceAtLeast(0f))
-                                            onUpdateTextBox(
-                                                box.copy(
-                                                    left = newLeft,
-                                                    top = newTop,
-                                                    right = (newLeft + w).coerceAtMost(1f),
-                                                    bottom = (newTop + h).coerceAtMost(1f)
-                                                ),
-                                                false
-                                            )
+                                if (isActive) {
+                                    BasicTextField(
+                                        value = box.text,
+                                        onValueChange = { newText ->
+                                            onUpdateTextBox(box.copy(text = newText), false)
+                                        },
+                                        textStyle = textStyle,
+                                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusRequester(focusRequester),
+                                        decorationBox = { innerTextField ->
+                                            if (box.text.isEmpty()) {
+                                                Text(
+                                                    text = strings.typeTextHint,
+                                                    style = textStyle.copy(color = Color.Gray)
+                                                )
+                                            }
+                                            innerTextField()
                                         }
                                     )
+                                } else {
+                                    Text(
+                                        text = box.text.ifEmpty { strings.typeTextHint },
+                                        style = textStyle.copy(
+                                            color = if (box.text.isEmpty()) Color.Gray else Color(box.colorArgb)
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { onSelectTextBox(box.id) }
+                                    )
                                 }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        ) {
-                            val textStyle = TextStyle(
-                                color = Color(box.colorArgb),
-                                fontSize = fontSp,
-                                fontWeight = if (box.isBold) FontWeight.Bold else FontWeight.Normal,
-                                lineHeight = fontSp * 1.25f,
-                                textDirection = TextDirection.Content
-                            )
-                            if (isActive) {
-                                BasicTextField(
-                                    value = box.text,
-                                    onValueChange = { newText ->
-                                        onUpdateTextBox(box.copy(text = newText), false)
-                                    },
-                                    textStyle = textStyle,
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .focusRequester(focusRequester),
-                                    decorationBox = { innerTextField ->
-                                        if (box.text.isEmpty()) {
-                                            Text(
-                                                text = strings.typeTextHint,
-                                                style = textStyle.copy(color = Color.Gray)
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-                                )
-                            } else {
-                                Text(
-                                    text = box.text.ifEmpty { strings.typeTextHint },
-                                    style = textStyle.copy(
-                                        color = if (box.text.isEmpty()) Color.Gray else Color(box.colorArgb)
-                                    ),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { onSelectTextBox(box.id) }
-                                )
                             }
                         }
                     }
@@ -967,6 +1042,18 @@ private fun TextEditorWorkspace(
                                     )
                                 }
                             )
+
+                            FilterChip(
+                                selected = isMovingActiveBox,
+                                onClick = { isMovingActiveBox = !isMovingActiveBox },
+                                label = {
+                                    Icon(
+                                        Icons.Default.OpenWith,
+                                        contentDescription = strings.moveTextBox,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            )
                         }
 
                         Row(
@@ -1054,28 +1141,16 @@ private fun TextEditorWorkspace(
                     }
 
                     Button(
-                        onClick = {
-                            val stagger = (page.textEdits.size % 5) * 0.11f
-                            val topPos = (0.14f + stagger).coerceAtMost(0.75f)
-                            val newBox = EditorTextBox(
-                                text = "",
-                                left = 0.10f,
-                                top = topPos,
-                                right = 0.86f,
-                                bottom = (topPos + 0.08f).coerceAtMost(0.95f),
-                                coverBackground = false,
-                                fontSizePts = 16f,
-                                colorArgb = 0xFF111111L,
-                                isBold = false,
-                            )
-                            onAddTextBox(newBox)
-                        },
+                        onClick = { isPlacingNewBox = !isPlacingNewBox },
                         shape = RoundedCornerShape(12.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
                     ) {
                         Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(strings.addText, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = if (isPlacingNewBox) strings.cancel else strings.addText,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }

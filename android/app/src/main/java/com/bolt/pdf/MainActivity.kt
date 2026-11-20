@@ -277,10 +277,14 @@ class MainActivity : ComponentActivity() {
                             BackHandler {
                                 subScreen = HomeSubScreen.HOME
                             }
+                            val driveStoredFiles by viewModel.driveStoredFiles.collectAsState()
+                            val isLoadingDriveFiles by viewModel.isLoadingDriveFiles.collectAsState()
                             SettingsScreen(
                                 darkMode = globalDarkMode,
                                 selectedLanguageTag = appLanguageTag,
                                 driveAccountEmail = driveAccountEmail,
+                                driveStoredFiles = driveStoredFiles,
+                                isLoadingDriveFiles = isLoadingDriveFiles,
                                 onBack = { subScreen = HomeSubScreen.HOME },
                                 onToggleDarkMode = { enabled -> viewModel.setGlobalDarkMode(enabled) },
                                 onSelectLanguage = { tag -> viewModel.setAppLanguageTag(tag) },
@@ -288,6 +292,8 @@ class MainActivity : ComponentActivity() {
                                     googleSignInLauncher.launch(viewModel.driveSyncManager.getSignInIntent())
                                 },
                                 onDisconnectGoogleAccount = { viewModel.signOutGoogleDrive() },
+                                onLoadDriveStoredFiles = { viewModel.loadDriveStoredFiles() },
+                                onDeleteDriveStoredFile = { file -> viewModel.deleteDriveStoredFile(file) },
                                 onOpenMergePdfs = {
                                     mergeEntries = emptyList()
                                     subScreen = HomeSubScreen.MERGE

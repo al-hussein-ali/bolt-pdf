@@ -2066,6 +2066,62 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         _driveSyncConflicts.value = emptyList()
     }
 
+    private val _driveStoredFiles = MutableStateFlow<List<DriveStoredFile>>(emptyList())
+    val driveStoredFiles: StateFlow<List<DriveStoredFile>> = _driveStoredFiles.asStateFlow()
+
+    private val _isLoadingDriveFiles = MutableStateFlow(false)
+    val isLoadingDriveFiles: StateFlow<Boolean> = _isLoadingDriveFiles.asStateFlow()
+
+    fun loadDriveStoredFiles() {
+        if (!requireOnlineAndAccount()) return
+        viewModelScope.launch {
+            _isLoadingDriveFiles.value = true
+            try {
+                val token = driveSyncManager.fetchAccessToken()
+                _driveStoredFiles.value = driveSyncManager.listAppDataPdfFiles(token)
+            } catch (e: DriveAuthResolutionException) {
+                pendingDriveRetryAction = { loadDriveStoredFiles() }
+                _driveAuthPendingIntent.tryEmit(e.pendingIntent)
+            } catch (e: Exception) {
+                _snackbarMessages.tryEmit(
+                    str(R.string.drive_delete_failed, e.message ?: unknownErrorText())
+                )
+            } finally {
+                _isLoadingDriveFiles.value = false
+            }
+        }
+    }
+
+    fun deleteDriveStoredFile(file: DriveStoredFile) {
+        if (!requireOnlineAndAccount()) return
+        viewModelScope.launch {
+            _isLoadingDriveFiles.value = true
+            try {
+                val token = driveSyncManager.fetchAccessToken()
+                driveSyncManager.deleteAppDataFile(token, file.id)
+                val (manifestId, existingItems) = driveSyncManager.loadManifest(token)
+                val filtered = existingItems.filterNot { item ->
+                    item.driveFileId == file.id ||
+                        (file.fileHash != null && item.fileHash == file.fileHash)
+                }
+                if (manifestId != null && filtered.size != existingItems.size) {
+                    driveSyncManager.saveManifest(token, manifestId, filtered)
+                }
+                _driveStoredFiles.value = _driveStoredFiles.value.filterNot { it.id == file.id }
+                _snackbarMessages.tryEmit(str(R.string.drive_file_deleted, file.name))
+            } catch (e: DriveAuthResolutionException) {
+                pendingDriveRetryAction = { deleteDriveStoredFile(file) }
+                _driveAuthPendingIntent.tryEmit(e.pendingIntent)
+            } catch (e: Exception) {
+                _snackbarMessages.tryEmit(
+                    str(R.string.drive_delete_failed, e.message ?: unknownErrorText())
+                )
+            } finally {
+                _isLoadingDriveFiles.value = false
+            }
+        }
+    }
+
     private fun requireOnlineAndAccount(): Boolean {
         if (_driveAccountEmail.value == null) {
             _snackbarMessages.tryEmit(
