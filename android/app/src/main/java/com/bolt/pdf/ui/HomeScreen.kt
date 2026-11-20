@@ -378,8 +378,6 @@ fun HomeScreen(
                         allRecentCount = recentFiles.size,
                         sortedRecents = sortedRecents,
                         searchQuery = searchQuery,
-                        progressFilter = progressFilter,
-                        onSelectProgressFilter = onSelectProgressFilter,
                         gridState = recentGridState,
                         favoriteHashes = favoriteHashes,
                         favoriteUris = favoriteUris,

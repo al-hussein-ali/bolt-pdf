@@ -51,8 +51,6 @@ internal fun RecentTabContent(
     allRecentCount: Int,
     sortedRecents: List<ReadingProgress>,
     searchQuery: String,
-    progressFilter: HomeProgressFilter,
-    onSelectProgressFilter: (HomeProgressFilter) -> Unit,
     gridState: LazyGridState,
     favoriteHashes: Set<String>,
     favoriteUris: Set<String>,
@@ -69,31 +67,7 @@ internal fun RecentTabContent(
     onDelete: (ReadingProgress) -> Unit,
 ) {
     val strings = LocalAppStrings.current
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (!isSelectionMode && allRecentCount > 0) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                HomeProgressFilter.entries.forEach { filter ->
-                    val label = when (filter) {
-                        HomeProgressFilter.ALL -> strings.filterAll
-                        HomeProgressFilter.UNREAD -> strings.filterUnread
-                        HomeProgressFilter.IN_PROGRESS -> strings.filterInProgress
-                        HomeProgressFilter.COMPLETED -> strings.filterFinished
-                    }
-                    FilterChip(
-                        selected = progressFilter == filter,
-                        onClick = { onSelectProgressFilter(filter) },
-                        label = { Text(label, style = MaterialTheme.typography.labelMedium) }
-                    )
-                }
-            }
-        }
-        when {
+    when {
         isLoadingRecents && allRecentCount == 0 -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -145,7 +119,6 @@ internal fun RecentTabContent(
                 }
             }
         }
-    }
     }
 }
 

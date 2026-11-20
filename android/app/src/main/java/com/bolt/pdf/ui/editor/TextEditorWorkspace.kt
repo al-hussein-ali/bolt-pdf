@@ -106,6 +106,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -320,6 +321,7 @@ internal fun TextEditorWorkspace(
                         val fontSp = with(density) { (box.fontSizePts * ptsToPx).toSp() }
 
                         val focusRequester = remember(box.id) { FocusRequester() }
+                        val latestBox by rememberUpdatedState(box)
 
                         LaunchedEffect(isActive) {
                             if (isActive) {
@@ -338,20 +340,21 @@ internal fun TextEditorWorkspace(
                         ) {
                             if (isActive) {
                                 Surface(
-                                    shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp),
+                                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
                                         .pointerInput(box.id, pageWidthPx, pageHeightPx) {
                                             detectDragGestures { change, dragAmount ->
                                                 change.consume()
+                                                val cur = latestBox
                                                 val dx = dragAmount.x / pageWidthPx.toFloat()
                                                 val dy = dragAmount.y / pageHeightPx.toFloat()
-                                                val w = box.right - box.left
-                                                val h = box.bottom - box.top
-                                                val newLeft = (box.left + dx).coerceIn(0f, (1f - w).coerceAtLeast(0f))
-                                                val newTop = (box.top + dy).coerceIn(0f, (1f - h).coerceAtLeast(0f))
+                                                val w = cur.right - cur.left
+                                                val h = cur.bottom - cur.top
+                                                val newLeft = (cur.left + dx).coerceIn(0f, (1f - w).coerceAtLeast(0f))
+                                                val newTop = (cur.top + dy).coerceIn(0f, (1f - h).coerceAtLeast(0f))
                                                 onUpdateTextBox(
-                                                    box.copy(
+                                                    cur.copy(
                                                         left = newLeft,
                                                         top = newTop,
                                                         right = (newLeft + w).coerceAtMost(1f),
@@ -363,7 +366,7 @@ internal fun TextEditorWorkspace(
                                         }
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
