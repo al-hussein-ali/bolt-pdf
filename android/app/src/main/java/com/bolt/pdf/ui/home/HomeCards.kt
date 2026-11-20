@@ -294,6 +294,7 @@ internal fun DevicePdfCard(
     onEdit: () -> Unit,
     onMerge: () -> Unit,
     onSplit: () -> Unit,
+    onDelete: () -> Unit,
     onUploadToDrive: (() -> Unit)? = null,
 ) {
     val strings = LocalAppStrings.current
@@ -416,6 +417,18 @@ internal fun DevicePdfCard(
                                 onClick = { menuExpanded = false; onUploadToDrive() }
                             )
                         }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        DropdownMenuItem(
+                            text = { Text(strings.delete, color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            onClick = { menuExpanded = false; onDelete() }
+                        )
                     }
                 }
             }

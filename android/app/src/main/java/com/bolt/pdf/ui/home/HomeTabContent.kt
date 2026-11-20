@@ -143,6 +143,7 @@ internal fun FavoritesTabContent(
     onEditDevice: (DevicePdfItem) -> Unit,
     onMergeDevice: (DevicePdfItem) -> Unit,
     onSplitDevice: (DevicePdfItem) -> Unit,
+    onDeleteDevice: (DevicePdfItem) -> Unit,
 ) {
     val strings = LocalAppStrings.current
     val totalFavorites = sortedFavoriteRecents.size + sortedFavoriteDeviceOnly.size
@@ -198,7 +199,8 @@ internal fun FavoritesTabContent(
                 onShare = { onShareDevice(item) },
                 onEdit = { onEditDevice(item) },
                 onMerge = { onMergeDevice(item) },
-                onSplit = { onSplitDevice(item) }
+                onSplit = { onSplitDevice(item) },
+                onDelete = { onDeleteDevice(item) }
             )
         }
     }
@@ -224,6 +226,7 @@ internal fun DevicePdfsTabContent(
     onEdit: (DevicePdfItem) -> Unit,
     onMerge: (DevicePdfItem) -> Unit,
     onSplit: (DevicePdfItem) -> Unit,
+    onDelete: (DevicePdfItem) -> Unit,
     onUploadToDrive: (DevicePdfItem) -> Unit,
 ) {
     when {
@@ -346,6 +349,7 @@ internal fun DevicePdfsTabContent(
                         onEdit = { onEdit(item) },
                         onMerge = { onMerge(item) },
                         onSplit = { onSplit(item) },
+                        onDelete = { onDelete(item) },
                         onUploadToDrive = if (driveAccountEmail != null && !isSyncingDrive) {
                             { onUploadToDrive(item) }
                         } else null

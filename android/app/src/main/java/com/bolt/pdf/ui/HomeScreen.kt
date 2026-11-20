@@ -130,6 +130,7 @@ fun HomeScreen(
     var selectedRecentHashes by remember { mutableStateOf(emptySet<String>()) }
     var selectedDeviceUris by remember { mutableStateOf(emptySet<String>()) }
     var showPermanentDeleteDialog by remember { mutableStateOf(false) }
+    var singleDeleteDeviceTarget by remember { mutableStateOf<DevicePdfItem?>(null) }
 
     fun clearSelection() {
         isSelectionMode = false
@@ -446,7 +447,8 @@ fun HomeScreen(
                         onShareDevice = onShareDevicePdf,
                         onEditDevice = onEditDevicePdf,
                         onMergeDevice = onMergeDevicePdf,
-                        onSplitDevice = onSplitDevicePdf
+                        onSplitDevice = onSplitDevicePdf,
+                        onDeleteDevice = { singleDeleteDeviceTarget = it }
                     )
 
                     else -> DevicePdfsTabContent(
@@ -478,6 +480,7 @@ fun HomeScreen(
                         onEdit = onEditDevicePdf,
                         onMerge = onMergeDevicePdf,
                         onSplit = onSplitDevicePdf,
+                        onDelete = { singleDeleteDeviceTarget = it },
                         onUploadToDrive = { onUploadDevicePdfsToDrive(listOf(it)) }
                     )
                 }
@@ -518,6 +521,17 @@ fun HomeScreen(
                     clearSelection()
                 },
                 onDismiss = { showPermanentDeleteDialog = false }
+            )
+        }
+
+        singleDeleteDeviceTarget?.let { target ->
+            PermanentDeleteDialog(
+                count = 1,
+                onConfirm = {
+                    singleDeleteDeviceTarget = null
+                    onDeleteDevicePdfs(listOf(target))
+                },
+                onDismiss = { singleDeleteDeviceTarget = null }
             )
         }
     }
