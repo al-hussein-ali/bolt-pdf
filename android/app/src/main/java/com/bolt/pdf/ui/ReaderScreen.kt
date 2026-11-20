@@ -126,6 +126,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -168,6 +170,15 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+
+private val NIGHT_MODE_COLOR_MATRIX = ColorMatrix(
+    floatArrayOf(
+        -0.92f, 0f, 0f, 0f, 240f,
+        0f, -0.92f, 0f, 0f, 240f,
+        0f, 0f, -0.92f, 0f, 240f,
+        0f, 0f, 0f, 1f, 0f
+    )
+)
 
 private val HIGHLIGHT_COLOR_OPTIONS = listOf(
     0x66FFEB3BL, // Yellow
@@ -605,7 +616,7 @@ fun ReaderScreen(
                                 tileWidthPx = tileW,
                                 tileHeightPx = tileH,
                                 rotation = progress.manualRotation,
-                                darkMode = progress.darkModeEnabled
+                                darkMode = false
                             )
                             if (bmp != null) {
                                 rendered[t.pageIdx] = ZoomTileOverlay(
@@ -623,6 +634,17 @@ fun ReaderScreen(
                         }
                         activeZoomTiles = rendered
                     }
+            }
+
+            // Prefetch adjacent pages into Rust TileCache for instant next/prev page turns
+            LaunchedEffect(progress.lastPageIndex, pageWidthPx, progress.manualRotation, state.dimensions) {
+                kotlinx.coroutines.delay(150)
+                viewModel.prefetchAdjacentPages(
+                    currentPage = progress.lastPageIndex.toInt(),
+                    targetWidthPx = pageWidthPx,
+                    dimensions = state.dimensions,
+                    rotation = progress.manualRotation
+                )
             }
 
             // Non-conflicting pinch-to-zoom + zoomed-pan gesture container:
@@ -1602,7 +1624,7 @@ private fun PdfPageItem(
     onHandleDragStateChanged: (Boolean) -> Unit,
     onNewDragSelectionStateChanged: (Boolean) -> Unit,
 ) {
-    var baseBitmap by remember(pageIndex, pageWidthPx, pageHeightPx, renderGeneration, rotation, darkMode) {
+    var baseBitmap by remember(pageIndex, pageWidthPx, pageHeightPx, renderGeneration, rotation) {
         mutableStateOf<Bitmap?>(null)
     }
     val density = LocalDensity.current
@@ -1610,14 +1632,14 @@ private fun PdfPageItem(
     val latestSelectionHandles by rememberUpdatedState(selectionHandles)
 
     // Cancel pending render immediately when item leaves viewport (OOM safeguard)
-    DisposableEffect(pageIndex, pageWidthPx, pageHeightPx, renderGeneration, rotation, darkMode) {
+    DisposableEffect(pageIndex, pageWidthPx, pageHeightPx, renderGeneration, rotation) {
         val job = scope.launch {
             val bmp = viewModel.renderBasePageBitmap(
                 pageIndex = pageIndex,
                 targetWidthPx = pageWidthPx,
                 targetHeightPx = pageHeightPx,
                 rotation = rotation,
-                darkMode = darkMode
+                darkMode = false
             )
             baseBitmap = bmp
         }
@@ -1625,7 +1647,7 @@ private fun PdfPageItem(
             job.cancel()
             val old = baseBitmap
             baseBitmap = null
-            old?.recycle()
+            viewModel.releaseBitmapToPool(old)
         }
     }
 
@@ -1682,12 +1704,17 @@ private fun PdfPageItem(
                 }
             }
     ) {
+        val nightFilter = remember(darkMode) {
+            if (darkMode) ColorFilter.colorMatrix(NIGHT_MODE_COLOR_MATRIX) else null
+        }
+
         baseBitmap?.let { bmp ->
             if (!bmp.isRecycled) {
                 Image(
                     bitmap = bmp.asImageBitmap(),
                     contentDescription = "Page ${pageIndex + 1}",
                     contentScale = ContentScale.FillBounds,
+                    colorFilter = nightFilter,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -1706,6 +1733,7 @@ private fun PdfPageItem(
                 bitmap = zoomTile.bitmap.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
+                colorFilter = nightFilter,
                 modifier = Modifier
                     .align(AbsoluteAlignment.TopLeft)
                     .absoluteOffset { IntOffset(offsetX, offsetY) }

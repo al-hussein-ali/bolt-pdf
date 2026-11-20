@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -101,6 +102,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.mutableStateOf
@@ -162,6 +164,7 @@ internal fun TextEditorWorkspace(
     var showFontMenu by remember { mutableStateOf(false) }
     var isPlacingNewBox by remember(page.id) { mutableStateOf(false) }
     var isMovingActiveBox by remember(activeTextBoxId) { mutableStateOf(false) }
+    var canvasZoom by remember(page.id) { mutableFloatStateOf(1f) }
 
     Column(modifier = modifier.fillMaxSize()) {
         if (isPlacingNewBox || isMovingActiveBox || activeBox == null) {
@@ -190,17 +193,25 @@ internal fun TextEditorWorkspace(
             }
         }
 
-        // Scrollable page canvas area
+        // Scrollable + pinch-zoomable page canvas area
         BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surfaceContainer)
+                .pointerInput(page.id) {
+                    detectTransformGestures { _, _, zoom, _ ->
+                        if (zoom != 1f) {
+                            canvasZoom = (canvasZoom * zoom).coerceIn(1f, 3f)
+                        }
+                    }
+                }
+                .horizontalScroll(rememberScrollState(), enabled = canvasZoom > 1.02f)
                 .verticalScroll(scrollState)
                 .padding(16.dp),
             contentAlignment = Alignment.TopCenter
         ) {
-            val maxCanvasWidthPx = constraints.maxWidth.coerceAtLeast(1)
+            val maxCanvasWidthPx = (constraints.maxWidth.coerceAtLeast(1) * canvasZoom).roundToInt()
             val aspectRatio = page.effectiveAspectRatio()
             val pageWidthPx = maxCanvasWidthPx
             val pageHeightPx = (pageWidthPx / aspectRatio).roundToInt().coerceAtLeast(1)
@@ -612,6 +623,14 @@ internal fun TextEditorWorkspace(
                         )
                         IconButton(onClick = onNextPage, enabled = pageNumber < totalPages) {
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = strings.next)
+                        }
+                        if (canvasZoom > 1.02f) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            FilterChip(
+                                selected = true,
+                                onClick = { canvasZoom = 1f },
+                                label = { Text("${String.format(java.util.Locale.US, "%.1f", canvasZoom)}x") }
+                            )
                         }
                     }
 

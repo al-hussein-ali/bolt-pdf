@@ -561,9 +561,32 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val pageTextCache = object : LinkedHashMap<String, PageTextContent>(4, 0.75f, true) {
+    private val pageTextCache = object : LinkedHashMap<String, PageTextContent>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PageTextContent>?): Boolean {
-            return size > 4
+            return size > 16
+        }
+    }
+
+    private val bitmapPool = ArrayDeque<Bitmap>()
+    private val bitmapPoolLock = Any()
+
+    private fun acquireBitmap(width: Int, height: Int): Bitmap {
+        synchronized(bitmapPoolLock) {
+            val idx = bitmapPool.indexOfFirst { !it.isRecycled && it.isMutable && it.width == width && it.height == height }
+            if (idx >= 0) {
+                return bitmapPool.removeAt(idx)
+            }
+        }
+        return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    }
+
+    fun releaseBitmapToPool(bitmap: Bitmap?) {
+        if (bitmap == null || bitmap.isRecycled || !bitmap.isMutable) return
+        synchronized(bitmapPoolLock) {
+            if (bitmapPool.size >= 6) {
+                bitmapPool.removeFirst().recycle()
+            }
+            bitmapPool.addLast(bitmap)
         }
     }
 
@@ -1303,7 +1326,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         val w = (targetWidthPx * scale).roundToInt().coerceAtLeast(1)
         val h = (targetHeightPx * scale).roundToInt().coerceAtLeast(1)
 
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val bitmap = acquireBitmap(w, h)
         val ok = NativeZeroCopy.renderPageDirect(
             enginePtr = engine.rawEnginePtr(),
             pageIndex = pageIndex,
@@ -1314,8 +1337,27 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         if (ok) {
             bitmap
         } else {
-            bitmap.recycle()
+            releaseBitmapToPool(bitmap)
             null
+        }
+    }
+
+    fun prefetchAdjacentPages(
+        currentPage: Int,
+        targetWidthPx: Int,
+        dimensions: List<PageDimension>,
+        rotation: PageRotation,
+    ) {
+        if (targetWidthPx <= 0 || dimensions.isEmpty()) return
+        viewModelScope.launch(Dispatchers.Default) {
+            for (offset in listOf(1, -1)) {
+                val idx = currentPage + offset
+                if (idx !in dimensions.indices) continue
+                val aspect = dimensions[idx].aspectRatio.coerceAtLeast(0.1f)
+                val targetH = (targetWidthPx / aspect).roundToInt().coerceAtLeast(1)
+                val bmp = renderBasePageBitmap(idx, targetWidthPx, targetH, rotation, darkMode = false)
+                releaseBitmapToPool(bmp)
+            }
         }
     }
 
@@ -1332,7 +1374,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     ): Bitmap? = withContext(Dispatchers.Default) {
         val safeW = tileWidthPx.coerceIn(1, MAX_TILE_EDGE_PX)
         val safeH = tileHeightPx.coerceIn(1, MAX_TILE_EDGE_PX)
-        val bitmap = Bitmap.createBitmap(safeW, safeH, Bitmap.Config.ARGB_8888)
+        val bitmap = acquireBitmap(safeW, safeH)
         val ok = NativeZeroCopy.renderZoomTileDirect(
             enginePtr = engine.rawEnginePtr(),
             pageIndex = pageIndex,
@@ -1347,7 +1389,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         if (ok) {
             bitmap
         } else {
-            bitmap.recycle()
+            releaseBitmapToPool(bitmap)
             null
         }
     }

@@ -65,7 +65,7 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Save
@@ -406,7 +406,7 @@ internal fun PageOrganizerWorkspace(
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.NoteAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(strings.addBlankPage, fontWeight = FontWeight.SemiBold)
                     }

@@ -227,6 +227,22 @@ internal fun SwapPagesDialog(
     )
 }
 
+private val editorPreviewCache = object : android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+}
+
+private fun calculateSampleSize(rawW: Int, rawH: Int, reqW: Int, reqH: Int): Int {
+    var sample = 1
+    if (rawH > reqH || rawW > reqW) {
+        val halfH = rawH / 2
+        val halfW = rawW / 2
+        while ((halfH / sample) >= reqH && (halfW / sample) >= reqW) {
+            sample *= 2
+        }
+    }
+    return sample.coerceAtLeast(1)
+}
+
 @Composable
 internal fun EditorPagePreviewBitmap(
     page: EditorPageItem,
@@ -237,11 +253,15 @@ internal fun EditorPagePreviewBitmap(
     modifier: Modifier = Modifier,
 ) {
     val strings = LocalAppStrings.current
-    var bitmap by remember(page.id, page.kind, page.rotationDegrees, targetWidthPx, targetHeightPx) {
-        mutableStateOf<Bitmap?>(null)
+    val cacheKey = "${page.id}_${page.rotationDegrees}_${targetWidthPx}x${targetHeightPx}"
+    var bitmap by remember(cacheKey) {
+        mutableStateOf<Bitmap?>(editorPreviewCache.get(cacheKey)?.takeUnless { it.isRecycled })
     }
 
-    DisposableEffect(page.id, page.kind, page.rotationDegrees, targetWidthPx, targetHeightPx) {
+    DisposableEffect(cacheKey) {
+        if (bitmap != null) {
+            return@DisposableEffect onDispose { }
+        }
         var active = true
         val job = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             val rendered: Bitmap? = when (val kind = page.kind) {
@@ -256,29 +276,31 @@ internal fun EditorPagePreviewBitmap(
                 }
                 is EditorPageKind.Image -> {
                     runCatching {
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         context.contentResolver.openInputStream(kind.uri)?.use { stream ->
-                            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
-                            BitmapFactory.decodeStream(stream, null, opts)
+                            BitmapFactory.decodeStream(stream, null, bounds)
+                        }
+                        val sample = calculateSampleSize(bounds.outWidth, bounds.outHeight, targetWidthPx, targetHeightPx)
+                        context.contentResolver.openInputStream(kind.uri)?.use { stream ->
+                            BitmapFactory.decodeStream(stream, null, BitmapFactory.Options().apply { inSampleSize = sample })
                         }
                     }.getOrNull()
                 }
                 is EditorPageKind.Blank,
                 is EditorPageKind.ExternalPdf -> null
             }
+            if (rendered != null && !rendered.isRecycled) {
+                editorPreviewCache.put(cacheKey, rendered)
+            }
             withContext(Dispatchers.Main) {
                 if (active) {
                     bitmap = rendered
-                } else {
-                    rendered?.recycle()
                 }
             }
         }
         onDispose {
             active = false
             job.cancel()
-            val old = bitmap
-            bitmap = null
-            old?.recycle()
         }
     }
 

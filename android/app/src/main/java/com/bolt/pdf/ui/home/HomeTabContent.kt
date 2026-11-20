@@ -2,6 +2,7 @@ package com.bolt.pdf.ui.home
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Description
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bolt.pdf.DevicePdfItem
+import com.bolt.pdf.HomeProgressFilter
 import com.bolt.pdf.ui.LocalAppStrings
 import uniffi.pdf_core.ReadingProgress
 
@@ -47,6 +51,8 @@ internal fun RecentTabContent(
     allRecentCount: Int,
     sortedRecents: List<ReadingProgress>,
     searchQuery: String,
+    progressFilter: HomeProgressFilter,
+    onSelectProgressFilter: (HomeProgressFilter) -> Unit,
     gridState: LazyGridState,
     favoriteHashes: Set<String>,
     favoriteUris: Set<String>,
@@ -63,7 +69,31 @@ internal fun RecentTabContent(
     onDelete: (ReadingProgress) -> Unit,
 ) {
     val strings = LocalAppStrings.current
-    when {
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (!isSelectionMode && allRecentCount > 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                HomeProgressFilter.entries.forEach { filter ->
+                    val label = when (filter) {
+                        HomeProgressFilter.ALL -> strings.filterAll
+                        HomeProgressFilter.UNREAD -> strings.filterUnread
+                        HomeProgressFilter.IN_PROGRESS -> strings.filterInProgress
+                        HomeProgressFilter.COMPLETED -> strings.filterFinished
+                    }
+                    FilterChip(
+                        selected = progressFilter == filter,
+                        onClick = { onSelectProgressFilter(filter) },
+                        label = { Text(label, style = MaterialTheme.typography.labelMedium) }
+                    )
+                }
+            }
+        }
+        when {
         isLoadingRecents && allRecentCount == 0 -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -115,6 +145,7 @@ internal fun RecentTabContent(
                 }
             }
         }
+    }
     }
 }
 
