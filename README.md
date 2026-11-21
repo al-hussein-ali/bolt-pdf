@@ -22,11 +22,11 @@
 
 - **Blazing-Fast Native Rendering** — Powered by a Rust (`pdf_core`) engine wrapping PDFium (`pdfium-render`), memory-mapped I/O (`memmap2`), an LRU tile cache, bitmap pooling, adjacent-page prefetching, GPU-accelerated night mode, and zero-copy JNI bitmap transfers (`NativeZeroCopy`) for smooth scrolling and zooming.
 - **Smart Text Selection (LTR, RTL & Mixed BiDi)** — Accurate character/word selection with BiDi support, Arabic diacritic ordering, and duplicate-glyph cleanup.
-- **Full-Text Search & Reading State** — Fast in-document search, bookmarks/favorites, 1-tap reading-status quick filters, and automatic reading progress persistence backed by bundled SQLite (`rusqlite`).
+- **Full-Text Search & Reading State** — Fast in-document search, bookmarks/favorites (preserved even when removed from Recent), direct single-file delete on On-Device PDFs, and automatic reading progress persistence backed by bundled SQLite (`rusqlite`, `bolt_pdf.db`).
 - **Built-in PDF Editor** — Add and position text boxes anywhere on pages (tap-to-place, drag handle, pinch-to-zoom, font size/bold/color/white-fill styling, and automatic RTL/LTR direction), organize pages (select, reorder, swap two pages, rotate, duplicate, delete, add blank pages, insert images), undo/redo, and save as a new file or overwrite — all processed on-device in Rust (`apply_pdf_edits`).
 - **On-Device PDF Tools** — Built-in PDF tools (`tools.rs`) directly inside the app with zero third-party server uploads.
 - **Built-in Markdown Reader** — Native Markdown viewer with GFM tables, callouts, task lists, clickable links, and automatic RTL/LTR direction support.
-- **Private Google Drive Cloud Sync** — Optional sync using Google Drive's isolated `appDataFolder` (`drive.appdata` scope) for Recent & On-Device PDFs, reading progress, and favorites — featuring SHA-256 deduplication, quota checks, conflict resolution, and in-app Drive storage management (list & delete uploaded files).
+- **Private Google Drive Cloud Sync & Scheduled Backup** — Optional sync using Google Drive's isolated `appDataFolder` (`drive.appdata` scope) for Recent & On-Device PDFs, reading progress, and favorites — featuring SHA-256 deduplication, quota checks, conflict resolution, in-app Drive storage management (list & delete uploaded files), and **WorkManager background Auto-Upload & Auto-Sync** (custom daily schedule, Wi-Fi-only option, keep/replace old edited versions, active-reader protection, and instant progress sync on close).
 - **Multi-Language Interface** — Built-in **English** and **Arabic (العربية)** UI with automatic RTL support, Android per-app language integration, and zero-code XML localization ([add a language](TRANSLATING.md)).
 
 ---
@@ -38,7 +38,7 @@
 | **Android UI** | Kotlin, Jetpack Compose (BOM `2024.10.01`), Material 3, ViewModel + StateFlow, Coroutines |
 | **Native Bridge** | UniFFI (`0.28`), JNA (`5.14.0`), custom JNI zero-copy bitmap surface (`android_jni.rs`) |
 | **Rust Core (`pdf_core`)** | Rust (2021 edition), `pdfium-render` (`0.8`), `rusqlite` (`0.32`, bundled), `memmap2`, `lru`, `image`, `sha2`, `parking_lot` |
-| **Cloud Sync & Auth** | Google Play Services Auth (`21.2.0`), Google Drive REST API v3 (`drive.appdata`), OkHttp (`4.12.0`) |
+| **Cloud Sync & Background Work** | Google Play Services Auth (`21.2.0`), Google Drive REST API v3 (`drive.appdata`), OkHttp (`4.12.0`), AndroidX WorkManager (`2.10.0`) |
 | **Build & Size Optimization** | `opt-level = "z"`, fat LTO, `codegen-units = 1`, `panic = "abort"`, symbol stripping, R8 minification & resource shrinking |
 
 ---
@@ -52,6 +52,7 @@
 │       ├── MainActivity.kt         # App entry point & navigation host
 │       ├── PdfViewModel.kt         # State management, library & sync orchestration
 │       ├── GoogleDriveSyncManager.kt # Google Sign-In & Drive appDataFolder REST client
+│       ├── DriveAutoSyncWorker.kt  # WorkManager daily Auto-Upload/Auto-Sync & BoltEngineHolder
 │       ├── NativeZeroCopy.kt       # Direct JNI bitmap rendering bridge
 │       └── ui/
 │           ├── HomeScreen.kt       # Recent, On Device & Favorites library screen
