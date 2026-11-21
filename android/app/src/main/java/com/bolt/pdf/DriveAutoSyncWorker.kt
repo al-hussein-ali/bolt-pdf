@@ -34,7 +34,19 @@ object BoltEngineHolder {
         instance?.let { return it }
         NativeZeroCopy
         val appCtx = context.applicationContext
-        val dbPath = File(appCtx.filesDir, "velocity_pdf.db").absolutePath
+        val newDb = File(appCtx.filesDir, "bolt_pdf.db")
+        val oldDb = File(appCtx.filesDir, "velocity_pdf.db")
+        if (!newDb.exists() && oldDb.exists()) {
+            oldDb.renameTo(newDb)
+            for (suffix in listOf("-wal", "-shm")) {
+                val oldSide = File(appCtx.filesDir, "velocity_pdf.db$suffix")
+                val newSide = File(appCtx.filesDir, "bolt_pdf.db$suffix")
+                if (oldSide.exists() && !newSide.exists()) {
+                    oldSide.renameTo(newSide)
+                }
+            }
+        }
+        val dbPath = newDb.absolutePath
         val pdfiumDir = appCtx.applicationInfo.nativeLibraryDir
         return PdfEngine(dbPath, pdfiumDir).also { instance = it }
     }
