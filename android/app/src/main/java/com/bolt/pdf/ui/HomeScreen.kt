@@ -80,6 +80,7 @@ fun HomeScreen(
     sizeFilter: HomeSizeFilter,
     favoriteHashes: Set<String>,
     favoriteUris: Set<String>,
+    hiddenFromRecentHashes: Set<String>,
     isOpeningDocument: Boolean,
     snackbarHostState: SnackbarHostState,
     onOpenSettings: () -> Unit,
@@ -164,10 +165,11 @@ fun HomeScreen(
         }
     }
 
-    val sortedRecents = remember(recentFiles, searchQuery, sortOption, dateFilter, progressFilter) {
+    val sortedRecents = remember(recentFiles, hiddenFromRecentHashes, searchQuery, sortOption, dateFilter, progressFilter) {
         val q = searchQuery.trim()
         sortRecentItems(
             recentFiles.filter { item ->
+                item.fileHash !in hiddenFromRecentHashes &&
                 (q.isEmpty() || item.displayName.contains(q, ignoreCase = true)) &&
                     matchesDateFilter(item.lastOpenedUnix, dateFilter) &&
                     matchesProgressFilter(item, progressFilter)

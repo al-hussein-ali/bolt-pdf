@@ -1,8 +1,6 @@
 package com.bolt.pdf
 
-import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -14,9 +12,33 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uniffi.pdf_core.PageRotation
+import uniffi.pdf_core.PdfEngine
+import uniffi.pdf_core.ReadingProgress
 import java.io.File
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
+
+/**
+ * Process-wide singleton holding the single PdfEngine (and its single rusqlite connection)
+ * so UI ViewModel and background WorkManager never open competing SQLite connections.
+ */
+object BoltEngineHolder {
+    @Volatile
+    private var instance: PdfEngine? = null
+
+    @Volatile
+    var activeReadingFileHash: String? = null
+
+    @Synchronized
+    fun getOrCreate(context: Context): PdfEngine {
+        instance?.let { return it }
+        NativeZeroCopy
+        val appCtx = context.applicationContext
+        val dbPath = File(appCtx.filesDir, "velocity_pdf.db").absolutePath
+        val pdfiumDir = appCtx.applicationInfo.nativeLibraryDir
+        return PdfEngine(dbPath, pdfiumDir).also { instance = it }
+    }
+}
 
 data class DriveAutoSyncSettings(
     val autoUploadEnabled: Boolean = false,
@@ -108,21 +130,6 @@ object DriveAutoSyncScheduler {
     }
 }
 
-private data class RecentDbRow(
-    val fileHash: String,
-    val fileUri: String,
-    val fallbackCachePath: String?,
-    val displayName: String,
-    val lastPageIndex: Int,
-    val pageOffsetFraction: Float,
-    val zoomScale: Float,
-    val panOffsetXFraction: Float,
-    val manualRotationOrdinal: Int,
-    val darkModeEnabled: Boolean,
-    val lastOpenedUnix: Long,
-    val totalPages: Int,
-)
-
 class DriveAutoSyncWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -142,162 +149,150 @@ class DriveAutoSyncWorker(
             return@withContext Result.retry()
         }
 
-        val dbFile = File(applicationContext.filesDir, "velocity_pdf.db")
-        if (!dbFile.exists()) {
-            return@withContext Result.success()
-        }
-
         return@withContext try {
+            val engine = BoltEngineHolder.getOrCreate(applicationContext)
             val token = syncManager.fetchAccessToken()
             val (manifestId, remoteItems) = syncManager.loadManifest(token)
             val manifestMap = remoteItems.associateBy { it.fileHash }.toMutableMap()
             var manifestChanged = false
 
-            val db = SQLiteDatabase.openDatabase(
-                dbFile.absolutePath,
-                null,
-                SQLiteDatabase.OPEN_READWRITE
-            )
-            db.use { database ->
-                val localRows = readRecentRows(database)
-                val localByHash = localRows.associateBy { it.fileHash }.toMutableMap()
+            val localRows = engine.getRecentFiles(200u)
+            val localByHash = localRows.associateBy { it.fileHash }
 
-                // 1. Always upload/push BEFORE fetching so newer local changes are never overwritten
-                if (settings.autoUploadEnabled && localRows.isNotEmpty()) {
-                    for (row in localRows) {
-                        val (resolvedFile, isTemp) = resolveLocalFile(row) ?: continue
-                        try {
-                            val existingRemote = manifestMap[row.fileHash]
-                            val driveId = existingRemote?.driveFileId
-                                ?: syncManager.findAppDataFileByHash(token, row.fileHash)
-                                ?: run {
-                                    val quota = runCatching { syncManager.getRemainingStorageBytes(token) }.getOrNull()
-                                    if (quota != null && quota < resolvedFile.length()) {
-                                        return@run null
-                                    }
-                                    syncManager.ensurePdfUploaded(
-                                        accessToken = token,
-                                        fileHash = row.fileHash,
-                                        displayName = row.displayName,
-                                        localFile = resolvedFile
-                                    )
-                                } ?: continue
-
-                            if (!settings.keepOldVersions) {
-                                val olderSameName = manifestMap.values.filter { old ->
-                                    old.displayName == row.displayName &&
-                                        old.fileHash != row.fileHash &&
-                                        old.lastOpenedUnix < row.lastOpenedUnix
+            // 1. Always upload/push BEFORE fetching so newer local progress is never overwritten
+            if (settings.autoUploadEnabled && localRows.isNotEmpty()) {
+                for (row in localRows) {
+                    val (resolvedFile, isTemp) = resolveLocalFile(row) ?: continue
+                    try {
+                        val existingRemote = manifestMap[row.fileHash]
+                        val driveId = existingRemote?.driveFileId?.takeIf { it.isNotBlank() }
+                            ?: syncManager.findAppDataFileByHash(token, row.fileHash)
+                            ?: run {
+                                val quota = runCatching { syncManager.getRemainingStorageBytes(token) }.getOrNull()
+                                if (quota != null && quota < resolvedFile.length()) {
+                                    return@run null
                                 }
-                                for (old in olderSameName) {
-                                    old.driveFileId?.let { oldId ->
-                                        runCatching { syncManager.deleteAppDataFile(token, oldId) }
-                                    }
-                                    manifestMap.remove(old.fileHash)
-                                    manifestChanged = true
-                                }
-                            }
-
-                            if (existingRemote == null || row.lastOpenedUnix >= existingRemote.lastOpenedUnix) {
-                                manifestMap[row.fileHash] = DriveManifestItem(
+                                syncManager.ensurePdfUploaded(
+                                    accessToken = token,
                                     fileHash = row.fileHash,
                                     displayName = row.displayName,
-                                    lastPageIndex = row.lastPageIndex,
-                                    totalPages = row.totalPages,
-                                    pageOffsetFraction = row.pageOffsetFraction,
-                                    zoomScale = row.zoomScale,
-                                    panOffsetXFraction = row.panOffsetXFraction,
-                                    manualRotation = PageRotation.entries
-                                        .getOrElse(row.manualRotationOrdinal) { PageRotation.DEG0 }
-                                        .name,
-                                    darkModeEnabled = row.darkModeEnabled,
-                                    lastOpenedUnix = row.lastOpenedUnix,
-                                    isFavorite = existingRemote?.isFavorite ?: false,
-                                    inRecent = true,
-                                    driveFileId = driveId,
-                                    fileSizeBytes = resolvedFile.length()
+                                    localFile = resolvedFile
                                 )
+                            } ?: continue
+
+                        if (!settings.keepOldVersions) {
+                            val olderSameName = manifestMap.values.filter { old ->
+                                old.displayName == row.displayName &&
+                                    old.fileHash != row.fileHash &&
+                                    old.lastOpenedUnix < row.lastOpenedUnix
+                            }
+                            for (old in olderSameName) {
+                                old.driveFileId.takeIf { it.isNotBlank() }?.let { oldId ->
+                                    runCatching { syncManager.deleteAppDataFile(token, oldId) }
+                                }
+                                manifestMap.remove(old.fileHash)
                                 manifestChanged = true
                             }
-                        } finally {
-                            if (isTemp) {
-                                runCatching { resolvedFile.delete() }
-                            }
                         }
-                    }
-                    if (manifestChanged) {
-                        syncManager.saveManifest(token, manifestId, manifestMap.values.toList())
+
+                        if (existingRemote == null || row.lastOpenedUnix >= existingRemote.lastOpenedUnix) {
+                            manifestMap[row.fileHash] = DriveManifestItem(
+                                fileHash = row.fileHash,
+                                displayName = row.displayName,
+                                lastPageIndex = row.lastPageIndex.toInt(),
+                                totalPages = row.totalPages.toInt(),
+                                pageOffsetFraction = row.pageOffsetFraction,
+                                zoomScale = row.zoomScale,
+                                panOffsetXFraction = row.panOffsetXFraction,
+                                manualRotation = row.manualRotation.name,
+                                darkModeEnabled = row.darkModeEnabled,
+                                lastOpenedUnix = row.lastOpenedUnix,
+                                isFavorite = existingRemote?.isFavorite ?: false,
+                                inRecent = true,
+                                driveFileId = driveId,
+                                fileSizeBytes = resolvedFile.length()
+                            )
+                            manifestChanged = true
+                        }
+                    } finally {
+                        if (isTemp) {
+                            runCatching { resolvedFile.delete() }
+                        }
                     }
                 }
+                if (manifestChanged) {
+                    syncManager.saveManifest(token, manifestId, manifestMap.values.toList())
+                }
+            }
 
-                // 2. Auto-sync (fetch from Drive) after upload completes
-                if (settings.autoSyncEnabled) {
-                    for (remote in manifestMap.values) {
-                        val local = localByHash[remote.fileHash]
-                        if (local == null) {
-                            val driveId = remote.driveFileId.takeIf { it.isNotBlank() }
-                                ?: syncManager.findAppDataFileByHash(token, remote.fileHash)
-                                ?: continue
-                            val (newUri, newFallback) = runCatching {
-                                syncManager.downloadPdfToDevice(
-                                    accessToken = token,
-                                    driveFileId = driveId,
-                                    displayName = remote.displayName,
-                                    fileHash = remote.fileHash
-                                )
-                            }.getOrNull() ?: continue
+            // 2. Auto-sync (fetch from Drive) after upload completes
+            if (settings.autoSyncEnabled) {
+                for (remote in manifestMap.values) {
+                    // Never overwrite the book the user is currently reading
+                    if (remote.fileHash == BoltEngineHolder.activeReadingFileHash) continue
 
-                            val rotationOrdinal = runCatching {
-                                PageRotation.valueOf(remote.manualRotation).ordinal
-                            }.getOrDefault(0)
-                            upsertRecentRow(
-                                database,
-                                RecentDbRow(
-                                    fileHash = remote.fileHash,
-                                    fileUri = newUri.toString(),
-                                    fallbackCachePath = newFallback,
-                                    displayName = remote.displayName,
-                                    lastPageIndex = remote.lastPageIndex,
-                                    pageOffsetFraction = remote.pageOffsetFraction,
-                                    zoomScale = remote.zoomScale,
-                                    panOffsetXFraction = 0.5f,
-                                    manualRotationOrdinal = rotationOrdinal,
-                                    darkModeEnabled = remote.darkModeEnabled,
-                                    lastOpenedUnix = remote.lastOpenedUnix,
-                                    totalPages = remote.totalPages
-                                )
+                    val local = localByHash[remote.fileHash]
+                    if (local == null) {
+                        val driveId = remote.driveFileId.takeIf { it.isNotBlank() }
+                            ?: syncManager.findAppDataFileByHash(token, remote.fileHash)
+                            ?: continue
+                        val (newUri, newFallback) = runCatching {
+                            syncManager.downloadPdfToDevice(
+                                accessToken = token,
+                                driveFileId = driveId,
+                                displayName = remote.displayName,
+                                fileHash = remote.fileHash
                             )
-                        } else if (remote.lastOpenedUnix > local.lastOpenedUnix) {
-                            // Only update local progress if remote is strictly newer
-                            val rotationOrdinal = runCatching {
-                                PageRotation.valueOf(remote.manualRotation).ordinal
-                            }.getOrDefault(local.manualRotationOrdinal)
-                            upsertRecentRow(
-                                database,
-                                local.copy(
-                                    lastPageIndex = remote.lastPageIndex,
-                                    pageOffsetFraction = remote.pageOffsetFraction,
-                                    zoomScale = remote.zoomScale,
-                                    manualRotationOrdinal = rotationOrdinal,
-                                    darkModeEnabled = remote.darkModeEnabled,
-                                    lastOpenedUnix = remote.lastOpenedUnix,
-                                    totalPages = remote.totalPages.coerceAtLeast(local.totalPages)
-                                )
+                        }.getOrNull() ?: continue
+
+                        val rotation = runCatching {
+                            PageRotation.valueOf(remote.manualRotation)
+                        }.getOrDefault(PageRotation.DEG0)
+                        engine.saveProgress(
+                            ReadingProgress(
+                                fileHash = remote.fileHash,
+                                fileUri = newUri.toString(),
+                                fallbackCachePath = newFallback,
+                                displayName = remote.displayName,
+                                lastPageIndex = remote.lastPageIndex.coerceAtLeast(0).toUInt(),
+                                pageOffsetFraction = remote.pageOffsetFraction,
+                                zoomScale = remote.zoomScale,
+                                panOffsetXFraction = remote.panOffsetXFraction,
+                                manualRotation = rotation,
+                                darkModeEnabled = remote.darkModeEnabled,
+                                lastOpenedUnix = remote.lastOpenedUnix,
+                                totalPages = remote.totalPages.coerceAtLeast(1).toUInt()
                             )
-                        }
+                        )
+                    } else if (remote.lastOpenedUnix > local.lastOpenedUnix) {
+                        // Only update local progress if remote is strictly newer
+                        val rotation = runCatching {
+                            PageRotation.valueOf(remote.manualRotation)
+                        }.getOrDefault(local.manualRotation)
+                        engine.saveProgress(
+                            local.copy(
+                                lastPageIndex = remote.lastPageIndex.coerceAtLeast(0).toUInt(),
+                                pageOffsetFraction = remote.pageOffsetFraction,
+                                zoomScale = remote.zoomScale,
+                                panOffsetXFraction = remote.panOffsetXFraction,
+                                manualRotation = rotation,
+                                darkModeEnabled = remote.darkModeEnabled,
+                                lastOpenedUnix = remote.lastOpenedUnix,
+                                totalPages = remote.totalPages.coerceAtLeast(local.totalPages.toInt()).toUInt()
+                            )
+                        )
                     }
                 }
             }
             Result.success()
         } catch (_: DriveAuthResolutionException) {
-            // Cannot prompt UI from background worker
             Result.failure()
         } catch (_: Exception) {
             Result.retry()
         }
     }
 
-    private fun resolveLocalFile(row: RecentDbRow): Pair<File, Boolean>? {
+    private fun resolveLocalFile(row: ReadingProgress): Pair<File, Boolean>? {
         val fb = row.fallbackCachePath?.let(::File)
         if (fb != null && fb.exists() && fb.length() > 0L) {
             return fb to false
@@ -318,58 +313,5 @@ class DriveAutoSyncWorker(
             runCatching { tmp.delete() }
             null
         }
-    }
-
-    private fun readRecentRows(db: SQLiteDatabase): List<RecentDbRow> {
-        val out = mutableListOf<RecentDbRow>()
-        db.rawQuery(
-            """
-            SELECT file_hash, file_uri, fallback_cache_path, display_name,
-                   last_page_index, page_offset_fraction, zoom_scale,
-                   pan_offset_x_fraction, manual_rotation, dark_mode_enabled,
-                   last_opened_unix, total_pages
-            FROM recent_files
-            ORDER BY last_opened_unix DESC
-            """.trimIndent(),
-            null
-        ).use { c ->
-            while (c.moveToNext()) {
-                out.add(
-                    RecentDbRow(
-                        fileHash = c.getString(0),
-                        fileUri = c.getString(1),
-                        fallbackCachePath = c.getString(2),
-                        displayName = c.getString(3),
-                        lastPageIndex = c.getInt(4),
-                        pageOffsetFraction = c.getFloat(5),
-                        zoomScale = c.getFloat(6),
-                        panOffsetXFraction = c.getFloat(7),
-                        manualRotationOrdinal = c.getInt(8),
-                        darkModeEnabled = c.getInt(9) != 0,
-                        lastOpenedUnix = c.getLong(10),
-                        totalPages = c.getInt(11),
-                    )
-                )
-            }
-        }
-        return out
-    }
-
-    private fun upsertRecentRow(db: SQLiteDatabase, row: RecentDbRow) {
-        val cv = ContentValues().apply {
-            put("file_hash", row.fileHash)
-            put("file_uri", row.fileUri)
-            put("fallback_cache_path", row.fallbackCachePath)
-            put("display_name", row.displayName)
-            put("last_page_index", row.lastPageIndex)
-            put("page_offset_fraction", row.pageOffsetFraction)
-            put("zoom_scale", row.zoomScale)
-            put("pan_offset_x_fraction", row.panOffsetXFraction)
-            put("manual_rotation", row.manualRotationOrdinal)
-            put("dark_mode_enabled", if (row.darkModeEnabled) 1 else 0)
-            put("last_opened_unix", row.lastOpenedUnix)
-            put("total_pages", row.totalPages)
-        }
-        db.insertWithOnConflict("recent_files", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
     }
 }

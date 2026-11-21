@@ -154,10 +154,7 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
     private val appContext = application.applicationContext
     private val engine: PdfEngine by lazy {
-        NativeZeroCopy
-        val dbPath = File(appContext.filesDir, "velocity_pdf.db").absolutePath
-        val pdfiumDir = appContext.applicationInfo.nativeLibraryDir
-        PdfEngine(dbPath, pdfiumDir)
+        BoltEngineHolder.getOrCreate(appContext)
     }
 
     private val prefs = appContext.getSharedPreferences("velocity_pdf_prefs", Context.MODE_PRIVATE)
@@ -231,6 +228,11 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         prefs.getStringSet("favorite_uris", emptySet())?.toSet() ?: emptySet()
     )
     val favoriteUris: StateFlow<Set<String>> = _favoriteUris.asStateFlow()
+
+    private val _hiddenFromRecentHashes = MutableStateFlow(
+        prefs.getStringSet("hidden_from_recent_hashes", emptySet())?.toSet() ?: emptySet()
+    )
+    val hiddenFromRecentHashes: StateFlow<Set<String>> = _hiddenFromRecentHashes.asStateFlow()
 
     private val _devicePdfs = MutableStateFlow<List<DevicePdfItem>>(emptyList())
     val devicePdfs: StateFlow<List<DevicePdfItem>> = _devicePdfs.asStateFlow()
@@ -336,6 +338,15 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
             .putStringSet("favorite_hashes", updatedHashes)
             .putStringSet("favorite_uris", updatedUris)
             .apply()
+        if (progress.fileHash !in updatedHashes && progress.fileHash in _hiddenFromRecentHashes.value) {
+            val nextHidden = _hiddenFromRecentHashes.value - progress.fileHash
+            _hiddenFromRecentHashes.value = nextHidden
+            prefs.edit().putStringSet("hidden_from_recent_hashes", nextHidden).apply()
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { engine.removeRecentFile(progress.fileHash) }
+                refreshRecentFiles()
+            }
+        }
     }
 
     fun toggleDevicePdfFavorite(item: DevicePdfItem) {
@@ -381,10 +392,26 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         if (fileHashes.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             val cacheDir = File(appContext.filesDir, "recent_cache")
+            val favHashes = _favoriteHashes.value
+            val favUris = _favoriteUris.value
+            val recentsByHash = _recentFiles.value.associateBy { it.fileHash }
+            val toHide = mutableSetOf<String>()
+
             fileHashes.forEach { fileHash ->
-                runCatching { engine.removeRecentFile(fileHash) }
-                val cached = File(cacheDir, "$fileHash.pdf")
-                if (cached.exists()) cached.delete()
+                val item = recentsByHash[fileHash]
+                val isFav = fileHash in favHashes || (item != null && item.fileUri in favUris)
+                if (isFav) {
+                    toHide.add(fileHash)
+                } else {
+                    runCatching { engine.removeRecentFile(fileHash) }
+                    val cached = File(cacheDir, "$fileHash.pdf")
+                    if (cached.exists()) cached.delete()
+                }
+            }
+            if (toHide.isNotEmpty()) {
+                val nextHidden = _hiddenFromRecentHashes.value + toHide
+                _hiddenFromRecentHashes.value = nextHidden
+                prefs.edit().putStringSet("hidden_from_recent_hashes", nextHidden).apply()
             }
             refreshRecentFiles()
             _snackbarMessages.tryEmit(
@@ -892,6 +919,12 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun applyOpenResult(result: DocumentOpenResult) {
         pageTextCache.clear()
+        BoltEngineHolder.activeReadingFileHash = result.progress.fileHash
+        if (result.progress.fileHash in _hiddenFromRecentHashes.value) {
+            val nextHidden = _hiddenFromRecentHashes.value - result.progress.fileHash
+            _hiddenFromRecentHashes.value = nextHidden
+            prefs.edit().putStringSet("hidden_from_recent_hashes", nextHidden).apply()
+        }
         val highlights = runCatching {
             engine.getHighlightsForFile(result.progress.fileHash)
         }.getOrDefault(emptyList())
@@ -914,7 +947,16 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closeDocument() {
+        val closingProgress = _readerState.value?.progress
+        BoltEngineHolder.activeReadingFileHash = null
         flushProgress()
+        if (closingProgress != null &&
+            _driveAutoSyncSettings.value.autoUploadEnabled &&
+            _driveAccountEmail.value != null &&
+            driveSyncManager.isOnline()
+        ) {
+            pushProgressOnlyToDrive(closingProgress)
+        }
         searchJob?.cancel()
         engine.cancelActiveSearch()
         pageTextCache.clear()
@@ -1133,10 +1175,18 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeRecentFile(fileHash: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { engine.removeRecentFile(fileHash) }
-            val cached = File(File(appContext.filesDir, "recent_cache"), "$fileHash.pdf")
-            if (cached.exists()) {
-                cached.delete()
+            val item = _recentFiles.value.firstOrNull { it.fileHash == fileHash }
+            val isFav = fileHash in _favoriteHashes.value || (item != null && item.fileUri in _favoriteUris.value)
+            if (isFav) {
+                val nextHidden = _hiddenFromRecentHashes.value + fileHash
+                _hiddenFromRecentHashes.value = nextHidden
+                prefs.edit().putStringSet("hidden_from_recent_hashes", nextHidden).apply()
+            } else {
+                runCatching { engine.removeRecentFile(fileHash) }
+                val cached = File(File(appContext.filesDir, "recent_cache"), "$fileHash.pdf")
+                if (cached.exists()) {
+                    cached.delete()
+                }
             }
             refreshRecentFiles()
         }
@@ -2108,6 +2158,33 @@ class PdfViewModel(application: Application) : AndroidViewModel(application) {
         _driveAutoSyncSettings.value = updated
         DriveAutoSyncPrefs.save(appContext, updated)
         DriveAutoSyncScheduler.scheduleOrCancel(appContext)
+    }
+
+    private fun pushProgressOnlyToDrive(progress: ReadingProgress) {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val token = driveSyncManager.fetchAccessToken()
+                val (manifestId, existingItems) = driveSyncManager.loadManifest(token)
+                val existing = existingItems.firstOrNull { it.fileHash == progress.fileHash }
+                    ?: return@runCatching
+                if (progress.lastOpenedUnix <= existing.lastOpenedUnix) return@runCatching
+
+                val updatedItem = existing.copy(
+                    lastPageIndex = progress.lastPageIndex.toInt(),
+                    totalPages = progress.totalPages.toInt(),
+                    pageOffsetFraction = progress.pageOffsetFraction,
+                    zoomScale = progress.zoomScale,
+                    panOffsetXFraction = progress.panOffsetXFraction,
+                    manualRotation = progress.manualRotation.name,
+                    darkModeEnabled = progress.darkModeEnabled,
+                    lastOpenedUnix = progress.lastOpenedUnix
+                )
+                val updatedList = existingItems.map {
+                    if (it.fileHash == progress.fileHash) updatedItem else it
+                }
+                driveSyncManager.saveManifest(token, manifestId, updatedList)
+            }
+        }
     }
 
     fun retryPendingDriveAction() {

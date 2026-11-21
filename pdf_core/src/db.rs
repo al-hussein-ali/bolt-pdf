@@ -36,11 +36,11 @@ impl Database {
             }
         }
 
-        let conn = Connection::open(db_path)
+        let mut conn = Connection::open(db_path)
             .map_err(|e| PdfError::DatabaseError(format!("Failed to open sqlite db: {e}")))?;
 
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
+        let schema_sql = "PRAGMA busy_timeout = 5000;
+             PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA temp_store = MEMORY;
              CREATE TABLE IF NOT EXISTS recent_files (
@@ -71,9 +71,23 @@ impl Database {
                  created_unix INTEGER NOT NULL
              );
              CREATE INDEX IF NOT EXISTS idx_highlights_file_page
-                 ON highlights(file_hash, page_index);",
-        )
-        .map_err(|e| PdfError::DatabaseError(format!("Failed to initialize schema: {e}")))?;
+                 ON highlights(file_hash, page_index);";
+
+        if let Err(err) = conn.execute_batch(schema_sql) {
+            let msg = err.to_string();
+            if msg.contains("malformed") || msg.contains("not a database") {
+                drop(conn);
+                let _ = std::fs::remove_file(format!("{db_path}-wal"));
+                let _ = std::fs::remove_file(format!("{db_path}-shm"));
+                let _ = std::fs::rename(db_path, format!("{db_path}.corrupt"));
+                conn = Connection::open(db_path)
+                    .map_err(|e| PdfError::DatabaseError(format!("Failed to reopen sqlite db: {e}")))?;
+                conn.execute_batch(schema_sql)
+                    .map_err(|e| PdfError::DatabaseError(format!("Failed to initialize schema: {e}")))?;
+            } else {
+                return Err(PdfError::DatabaseError(format!("Failed to initialize schema: {err}")));
+            }
+        }
 
         Ok(Self {
             conn: Mutex::new(conn),

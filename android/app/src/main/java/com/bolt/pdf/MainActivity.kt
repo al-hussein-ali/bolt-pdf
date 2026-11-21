@@ -394,6 +394,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         else -> {
+                            val hiddenFromRecentHashes by viewModel.hiddenFromRecentHashes.collectAsState()
                             HomeScreen(
                                 recentFiles = recentFiles,
                                 isLoadingRecents = isLoadingRecents,
@@ -406,6 +407,7 @@ class MainActivity : ComponentActivity() {
                                 sizeFilter = sizeFilter,
                                 favoriteHashes = favoriteHashes,
                                 favoriteUris = favoriteUris,
+                                hiddenFromRecentHashes = hiddenFromRecentHashes,
                                 isOpeningDocument = isOpeningDocument,
                                 snackbarHostState = snackbarHostState,
                                 onOpenSettings = { subScreen = HomeSubScreen.SETTINGS },
